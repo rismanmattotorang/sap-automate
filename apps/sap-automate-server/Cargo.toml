@@ -1,0 +1,24 @@
+[package]
+name = "sap-automate-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SAP-Automate MCP server binary (Phase 1)."
+
+[[bin]]
+name = "sap-automate-server"
+path = "src/main.rs"
+
+[dependencies]
+mcp-core = { workspace = true }
+mcp-server = { workspace = true }
+mcp-transport = { workspace = true }
+sap-automate-kb = { workspace = true }
+sap-automate-rag = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }

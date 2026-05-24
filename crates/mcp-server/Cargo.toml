@@ -1,0 +1,22 @@
+[package]
+name = "mcp-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MCP server framework: capability router, tool registry, dispatch loop."
+
+[dependencies]
+mcp-core = { workspace = true }
+mcp-transport = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+futures = { workspace = true }
+
+[dev-dependencies]
+mcp-client = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }

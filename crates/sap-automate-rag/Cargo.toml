@@ -1,0 +1,12 @@
+[package]
+name = "sap-automate-rag"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SAP-Automate layered RAG engine (Phase 3 / Phase 5A)."
+
+[dependencies]
+sap-automate-kb = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }

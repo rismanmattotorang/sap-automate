@@ -1,0 +1,12 @@
+[package]
+name = "mcp-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Model Context Protocol (MCP) core: JSON-RPC 2.0 codec and 2025-06-18 protocol types."
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

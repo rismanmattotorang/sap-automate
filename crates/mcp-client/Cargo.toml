@@ -1,0 +1,15 @@
+[package]
+name = "mcp-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MCP client framework with request/response correlation."
+
+[dependencies]
+mcp-core = { workspace = true }
+mcp-transport = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+futures = { workspace = true }

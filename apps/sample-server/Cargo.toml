@@ -1,0 +1,21 @@
+[package]
+name = "sample-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Minimal sample MCP server: a calculator + an echo tool over stdio."
+
+[[bin]]
+name = "sample-server"
+path = "src/main.rs"
+
+[dependencies]
+mcp-core = { workspace = true }
+mcp-server = { workspace = true }
+mcp-transport = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }

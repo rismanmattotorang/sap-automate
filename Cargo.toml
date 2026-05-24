@@ -1,0 +1,59 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mcp-core",
+    "crates/mcp-transport",
+    "crates/mcp-server",
+    "crates/mcp-client",
+    "crates/sap-automate-kb",
+    "crates/sap-automate-rag",
+    "crates/sap-automate-connectors",
+    "crates/sap-automate-skills",
+    "crates/sap-automate-memory",
+    "apps/sap-automate-server",
+    "apps/sample-server",
+    "apps/sample-client",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "Apache-2.0"
+repository = "https://github.com/rismanmattotorang/sap-automate"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+futures = "0.3"
+async-trait = "0.1"
+pin-project-lite = "0.2"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Errors / utility
+thiserror = "1"
+anyhow = "1"
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Internal crates
+mcp-core = { path = "crates/mcp-core" }
+mcp-transport = { path = "crates/mcp-transport" }
+mcp-server = { path = "crates/mcp-server" }
+mcp-client = { path = "crates/mcp-client" }
+sap-automate-kb = { path = "crates/sap-automate-kb" }
+sap-automate-rag = { path = "crates/sap-automate-rag" }
+sap-automate-connectors = { path = "crates/sap-automate-connectors" }
+sap-automate-skills = { path = "crates/sap-automate-skills" }
+sap-automate-memory = { path = "crates/sap-automate-memory" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

@@ -1,0 +1,275 @@
+//! MCP server: capability router + dispatch loop.
+
+use mcp_core::{
+    error::ErrorCode,
+    jsonrpc::{ErrorObject, Notification, Request, Response},
+    protocol::{
+        methods, CallToolParams, CallToolResult, GetPromptParams, GetPromptResult,
+        Implementation, InitializeParams, InitializeResult, ListPromptsResult, ListResourcesResult,
+        ListToolsResult, PromptsCapability, ReadResourceParams, ReadResourceResult,
+        ResourcesCapability, ServerCapabilities, ToolsCapability, PROTOCOL_VERSION,
+    },
+    Error, Id, Message, Result, ToolContent,
+};
+use mcp_transport::Transport;
+use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tracing::{debug, info, warn};
+
+use crate::registry::{
+    PromptDescriptor, PromptHandler, ResourceDescriptor, ResourceHandler, ToolDescriptor,
+    ToolHandler,
+};
+
+/// Builder for an MCP server.
+pub struct ServerBuilder {
+    info: Implementation,
+    instructions: Option<String>,
+    tools: HashMap<String, ToolDescriptor>,
+    resources: HashMap<String, ResourceDescriptor>,
+    prompts: HashMap<String, PromptDescriptor>,
+}
+
+impl ServerBuilder {
+    pub fn new(name: impl Into<String>, version: impl Into<String>) -> Self {
+        Self {
+            info: Implementation { name: name.into(), version: version.into() },
+            instructions: None,
+            tools: HashMap::new(),
+            resources: HashMap::new(),
+            prompts: HashMap::new(),
+        }
+    }
+
+    pub fn instructions(mut self, text: impl Into<String>) -> Self {
+        self.instructions = Some(text.into());
+        self
+    }
+
+    pub fn tool(mut self, descriptor: ToolDescriptor) -> Self {
+        self.tools.insert(descriptor.tool.name.clone(), descriptor);
+        self
+    }
+
+    pub fn tool_fn<F, Fut>(
+        self,
+        name: impl Into<String>,
+        description: impl Into<String>,
+        input_schema: mcp_core::ToolInputSchema,
+        handler: F,
+    ) -> Self
+    where
+        F: Fn(Value) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Result<CallToolResult>> + Send + 'static,
+    {
+        let descriptor = ToolDescriptor::new(
+            name,
+            Some(description.into()),
+            input_schema,
+            Arc::new(crate::registry::ToolFn(handler)),
+        );
+        self.tool(descriptor)
+    }
+
+    pub fn resource(mut self, descriptor: ResourceDescriptor) -> Self {
+        self.resources.insert(descriptor.resource.uri.clone(), descriptor);
+        self
+    }
+
+    pub fn prompt(mut self, descriptor: PromptDescriptor) -> Self {
+        self.prompts.insert(descriptor.prompt.name.clone(), descriptor);
+        self
+    }
+
+    pub fn build(self) -> Server {
+        Server {
+            context: Arc::new(ServerContext {
+                info: self.info,
+                instructions: self.instructions,
+                tools: self.tools,
+                resources: self.resources,
+                prompts: self.prompts,
+            }),
+        }
+    }
+}
+
+/// Immutable, shared server state.
+pub struct ServerContext {
+    pub info: Implementation,
+    pub instructions: Option<String>,
+    pub tools: HashMap<String, ToolDescriptor>,
+    pub resources: HashMap<String, ResourceDescriptor>,
+    pub prompts: HashMap<String, PromptDescriptor>,
+}
+
+impl ServerContext {
+    fn capabilities(&self) -> ServerCapabilities {
+        ServerCapabilities {
+            tools: (!self.tools.is_empty()).then(|| ToolsCapability { list_changed: false }),
+            resources: (!self.resources.is_empty())
+                .then(|| ResourcesCapability { list_changed: false, subscribe: false }),
+            prompts: (!self.prompts.is_empty()).then(|| PromptsCapability { list_changed: false }),
+            logging: None,
+            extra: Default::default(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct Server {
+    context: Arc<ServerContext>,
+}
+
+impl Server {
+    pub fn builder(name: impl Into<String>, version: impl Into<String>) -> ServerBuilder {
+        ServerBuilder::new(name, version)
+    }
+
+    pub fn context(&self) -> &Arc<ServerContext> { &self.context }
+
+    /// Drive the MCP dispatch loop over the given transport until EOF or
+    /// shutdown.
+    pub async fn run<T: Transport>(&self, mut transport: T) -> Result<()> {
+        info!(server = %self.context.info.name, "MCP server starting");
+        while let Some(message) = transport.recv().await? {
+            match message {
+                Message::Request(req) => {
+                    let response = self.dispatch(req).await;
+                    transport.send(Message::Response(response)).await?;
+                }
+                Message::Notification(n) => {
+                    self.on_notification(n);
+                }
+                Message::Response(_) => {
+                    warn!("server received unsolicited response; ignoring");
+                }
+            }
+        }
+        info!("MCP server stopping (transport EOF)");
+        Ok(())
+    }
+
+    fn on_notification(&self, n: Notification) {
+        debug!(method = %n.method, "notification received");
+    }
+
+    async fn dispatch(&self, req: Request) -> Response {
+        let id = req.id.clone();
+        match self.handle_method(&req).await {
+            Ok(result) => Response::success(id, result),
+            Err(e) => {
+                warn!(method = %req.method, error = %e, "request failed");
+                Response::failure(id, error_object(e))
+            }
+        }
+    }
+
+    async fn handle_method(&self, req: &Request) -> Result<Value> {
+        match req.method.as_str() {
+            methods::INITIALIZE => {
+                let params: InitializeParams = parse_params(req.params.clone())?;
+                let result = InitializeResult {
+                    protocol_version: select_protocol_version(&params.protocol_version),
+                    capabilities: self.context.capabilities(),
+                    server_info: self.context.info.clone(),
+                    instructions: self.context.instructions.clone(),
+                };
+                Ok(serde_json::to_value(result)?)
+            }
+            methods::PING => Ok(serde_json::json!({})),
+            methods::TOOLS_LIST => {
+                let result = ListToolsResult {
+                    tools: self.context.tools.values().map(|d| d.tool.clone()).collect(),
+                    next_cursor: None,
+                };
+                Ok(serde_json::to_value(result)?)
+            }
+            methods::TOOLS_CALL => {
+                let params: CallToolParams = parse_params(req.params.clone())?;
+                let descriptor = self
+                    .context
+                    .tools
+                    .get(&params.name)
+                    .ok_or_else(|| Error::protocol(ErrorCode::UnknownTool, format!("unknown tool '{}'", params.name)))?;
+                let args = params.arguments.unwrap_or(Value::Object(Default::default()));
+                let result = descriptor.handler.call(args).await.unwrap_or_else(|e| {
+                    CallToolResult {
+                        content: vec![ToolContent::text(e.to_string())],
+                        is_error: true,
+                    }
+                });
+                Ok(serde_json::to_value(result)?)
+            }
+            methods::RESOURCES_LIST => {
+                let result = ListResourcesResult {
+                    resources: self.context.resources.values().map(|d| d.resource.clone()).collect(),
+                    next_cursor: None,
+                };
+                Ok(serde_json::to_value(result)?)
+            }
+            methods::RESOURCES_READ => {
+                let params: ReadResourceParams = parse_params(req.params.clone())?;
+                let descriptor = self
+                    .context
+                    .resources
+                    .get(&params.uri)
+                    .ok_or_else(|| Error::protocol(ErrorCode::InvalidParams, format!("unknown resource '{}'", params.uri)))?;
+                let result: ReadResourceResult = descriptor.handler.read(&params.uri).await?;
+                Ok(serde_json::to_value(result)?)
+            }
+            methods::PROMPTS_LIST => {
+                let result = ListPromptsResult {
+                    prompts: self.context.prompts.values().map(|d| d.prompt.clone()).collect(),
+                    next_cursor: None,
+                };
+                Ok(serde_json::to_value(result)?)
+            }
+            methods::PROMPTS_GET => {
+                let params: GetPromptParams = parse_params(req.params.clone())?;
+                let descriptor = self
+                    .context
+                    .prompts
+                    .get(&params.name)
+                    .ok_or_else(|| Error::protocol(ErrorCode::InvalidParams, format!("unknown prompt '{}'", params.name)))?;
+                let result: GetPromptResult = descriptor.handler.get(params.arguments).await?;
+                Ok(serde_json::to_value(result)?)
+            }
+            other => Err(Error::protocol(ErrorCode::MethodNotFound, format!("method '{}' not supported", other))),
+        }
+    }
+}
+
+fn parse_params<T: serde::de::DeserializeOwned>(params: Option<Value>) -> Result<T> {
+    let value = params.unwrap_or(Value::Object(Default::default()));
+    serde_json::from_value(value).map_err(|e| {
+        Error::protocol(ErrorCode::InvalidParams, format!("invalid params: {e}"))
+    })
+}
+
+fn select_protocol_version(client: &str) -> String {
+    // If the client speaks our wire version, honour it; otherwise fall back to
+    // our supported version and let the client decide whether to proceed.
+    if client == PROTOCOL_VERSION {
+        client.to_string()
+    } else {
+        PROTOCOL_VERSION.to_string()
+    }
+}
+
+fn error_object(e: Error) -> ErrorObject {
+    match e {
+        Error::Protocol { code, message } => ErrorObject::new(code, message),
+        Error::Json(je) => ErrorObject::new(ErrorCode::ParseError.as_i32(), je.to_string()),
+        Error::Io(io) => ErrorObject::new(ErrorCode::InternalError.as_i32(), io.to_string()),
+        other => ErrorObject::new(ErrorCode::InternalError.as_i32(), other.to_string()),
+    }
+}
+
+// Silence unused-import warnings for types used in trait bounds only.
+#[allow(dead_code)]
+fn _trait_objects(_t: &dyn ToolHandler, _r: &dyn ResourceHandler, _p: &dyn PromptHandler) {}
+
+#[allow(unused_imports)]
+use Id as _Id; // keep Id in scope for future shutdown handling

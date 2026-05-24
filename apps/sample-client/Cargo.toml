@@ -1,0 +1,21 @@
+[package]
+name = "sample-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Sample MCP client. Spawns sap-automate-server over stdio and exercises the tool catalogue."
+
+[[bin]]
+name = "sample-client"
+path = "src/main.rs"
+
+[dependencies]
+mcp-core = { workspace = true }
+mcp-client = { workspace = true }
+mcp-transport = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+clap = { version = "4", features = ["derive"] }
