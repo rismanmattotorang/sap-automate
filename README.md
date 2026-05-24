@@ -66,6 +66,16 @@ cargo run --release -p sample-client -- --server target/release/sap-automate-ser
 cargo run --release --bin sap-automate-bench
 # → P95 ~0.16 ms over the pilot corpus (gate: 80 ms). Layer breakdown shows
 #   dense+sparse+RRF+rerank costs in μs each.
+
+# Demo 9 (Phase 4): operator TUI with live latency budget gauge
+cargo run --release --bin sap-automate-tui
+# → Five tabs: Sessions / Tools / KB / RAG / Logs. Press 1..5 to switch,
+#   q to quit. Synthetic traffic drives the layout; --admin-endpoint will
+#   wire to a running server in Phase 7.
+
+# Demo 10 (Phase 4): instantiate a skill (auto-loaded from ./skills/*.md)
+cargo run --release -p sample-client -- --server target/release/sap-automate-server \
+    --get-prompt 'sap.skill.period_close_investigation={"company_code":"1000","fiscal_period":"2026-M03"}'
 ```
 
 See [`docs/COMPARISON.md`](docs/COMPARISON.md) for the comparative analysis

@@ -48,7 +48,7 @@ sap-automate/
 | **P2**  | 5–8  | ADT + Signavio + LeanIX clients wired as MCP tools | typed tools live | **✅ extended**: 10 ADT tools (mario-andreschak coverage + fr0ster's where-used/CDS), `AdtClient` trait with `MockAdtClient` (offline) and `HttpAdtClient` (live, CSRF cache). Signavio + LeanIX clients land in Phase 5 |
 | **P3**  | 9–12 | Hybrid RAG (dense + sparse) + RRF fusion + cross-encoder reranker | P95 hybrid retrieval < 80 ms | **✅ done — P95 = 0.159 ms (500× under gate)** |
 | **P3A** | 12–15 (∥) | Contextual retrieval enrichment + SPLADE + parent-child expansion | P95 < 100 ms with reranking | **✅ contextual enrichment shipped**; SPLADE deferred to Phase 5A |
-| P4  | 13–16 | Ratatui TUI: Sessions / Tools / KB / RAG / Logs tabs | operators hold the latency budget visible | |
+| **P4**  | 13–16 | Ratatui TUI: Sessions / Tools / KB / RAG / Logs tabs | operators hold the latency budget visible | **✅ done** — five-tab TUI with P50/P95/P99 per tool, live LatencyBreakdown gauge against the 80 ms budget, KB staleness, structured log tail. Plus skills layer (5 starter skills auto-loaded as MCP prompts) — convergent pattern from `SAP/mdk-mcp-server` + `marianfoo/sap-ai-mcp-servers` + `fr0ster/mcp-abap-adt`. |
 | P5  | 17–20 | Next.js 14 web UI: chat, citation rendering, BPMN/graph preview | hands-on usability review | |
 | P5A | 20–24 (∥) | ArangoDB graph + Leiden communities + Personalised PageRank | multi-hop traversal < 400 ms P95 (≤4 hops) | |
 | P6  | 21–24 | MCP elicitation; SAP-typical workflow templates | live elicitation working | |

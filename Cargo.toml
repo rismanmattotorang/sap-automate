@@ -16,6 +16,7 @@ members = [
     "apps/sap-automate-server",
     "apps/sap-automate-ingest",
     "apps/sap-automate-bench",
+    "apps/sap-automate-tui",
     "apps/sample-server",
     "apps/sample-client",
 ]
@@ -65,6 +66,8 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "cors"] }
 quick-xml = { version = "0.36", features = ["serialize"] }
 toml = "0.8"
+ratatui = "0.28"
+crossterm = "0.28"
 
 # HTTP / web (Phase 1A)
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }

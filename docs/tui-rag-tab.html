@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<!-- This file was created with the aha Ansi HTML Adapter. https://github.com/theZiz/aha -->
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="application/xml+xhtml; charset=UTF-8"/>
+<title>SAP-Automate TUI: RAG tab</title>
+</head>
+<body style="color:white; background-color:black">
+<pre>
+┌<span style="font-weight:bold;"></span><span style="font-weight:bold;color:aqua;"> SAP-Automate / operator console </span>───────────────────────────────────────────────────────────────────────────────────────────────┐
+│ <span style="filter: contrast(70%) brightness(190%);color:dimgray;"> 1 </span><span style="filter: contrast(70%) brightness(190%);color:white;">Sessions</span> │ <span style="filter: contrast(70%) brightness(190%);color:dimgray;"> 2 </span><span style="filter: contrast(70%) brightness(190%);color:white;">Tools</span> │ <span style="filter: contrast(70%) brightness(190%);color:dimgray;"> 3 </span><span style="filter: contrast(70%) brightness(190%);color:white;">KB</span> │ <span style="font-weight:bold;"></span><span style="font-weight:bold;color:dimgray;"></span><span style="font-weight:bold;color:dimgray;background-color:aqua;"> 4 RAG</span> │ <span style="filter: contrast(70%) brightness(190%);color:dimgray;"> 5 </span><span style="filter: contrast(70%) brightness(190%);color:white;">Logs</span>                                                                              │
+└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ P95 latency budget (80 ms gate) ───────────────────────────────────────────────────────────────────────────────────────────────┐
+│<span style="color:lime;">                                                     247 μs / 80 ms gate (0%)                                                   </span>│
+└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ Layer breakdown (latest) ──────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│dense    37 μs   |   sparse    37 μs   |   fusion    2 μs   |   rerank    67 μs                                                 │
+└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ RAG pipeline — per-tool layer breakdown ───────────────────────────────────────────────────────────────────────────────────────┐
+│<span style="font-weight:bold;"></span><span style="font-weight:bold;color:aqua;">tool                       dense μs sparse μ fuse μ rerank μ total μs                                                           </span>│
+│sap.help.search               46       46       2      76    <span style="color:lime;">  156   </span>                                                           │
+│sap.rfc.search                37       37       2      67    <span style="color:lime;">  247   </span>                                                           │
+│sap.docs.search               45       45       2      75    <span style="color:lime;">  155   </span>                                                           │
+│abap.search                   45       45       2      55    <span style="color:lime;">  235   </span>                                                           │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+<span style="color:dimgray;"></span><span style="color:dimgray;background-color:aqua;"> SAP-Automate </span><span style="background-color:aqua;"></span>  up   5s | sessions  0 | calls    41 | errors   0 | <span style="filter: contrast(70%) brightness(190%);color:dimgray;">[1–5] tabs  [j/k] scroll  [q] quit</span>
+</pre>
+</body>
+</html>

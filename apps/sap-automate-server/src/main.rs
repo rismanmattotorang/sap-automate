@@ -27,6 +27,7 @@ use clap::Parser;
 use mcp_server::Server;
 use mcp_transport::StdioTransport;
 use sap_automate_adt::{AdtClient, AdtDestination, MockAdtClient};
+use sap_automate_skills::SkillRegistry;
 use sap_automate_ingest::{EmbeddingClient, MockEmbedder};
 use sap_automate_kb::{InMemoryKb, KnowledgeStore};
 use sap_automate_rag::RagEngine;
@@ -118,6 +119,18 @@ async fn main() -> anyhow::Result<()> {
     // AGENTS.md guardrails.
     let agents_md = load_agents_md(cli.agents_md.as_deref()).await;
 
+    // Skills auto-discovery — marianfoo pattern.
+    let mut skills = SkillRegistry::new();
+    let skill_paths: Vec<std::path::PathBuf> = vec![
+        std::path::PathBuf::from("./skills"),
+        std::path::PathBuf::from("./.sap-automate/skills"),
+        dirs_config_path("sap-automate/skills"),
+    ];
+    let loaded = skills.scan_paths(&skill_paths).await.unwrap_or(0);
+    if loaded > 0 {
+        tracing::info!(skills = loaded, "loaded agentic skills");
+    }
+
     let ctx = Arc::new(ServerContext {
         rag,
         embedder,
@@ -127,7 +140,7 @@ async fn main() -> anyhow::Result<()> {
         agents_md: agents_md.clone(),
     });
 
-    let server = build_server(ctx.clone(), &agents_md, read_only);
+    let server = build_server(ctx.clone(), &agents_md, read_only, &skills);
     tracing::info!(
         read_only = read_only,
         pool_size = cli.pool_size,
@@ -139,7 +152,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn build_server(ctx: Arc<ServerContext>, agents_md: &Option<String>, read_only: bool) -> Server {
+fn build_server(ctx: Arc<ServerContext>, agents_md: &Option<String>, read_only: bool, skills: &SkillRegistry) -> Server {
     let policy = if read_only {
         mcp_server::ExposurePolicy::ReadOnlyOnly
     } else {
@@ -162,8 +175,8 @@ fn build_server(ctx: Arc<ServerContext>, agents_md: &Option<String>, read_only: 
     // Resources.
     for desc in resources::all(&ctx) { builder = builder.resource(desc); }
 
-    // Prompts.
-    for desc in prompts::all() { builder = builder.prompt(desc); }
+    // Prompts (built-in + skills loaded from disk).
+    for desc in prompts::all(skills) { builder = builder.prompt(desc); }
 
     builder.build()
 }
@@ -189,6 +202,14 @@ fn build_instructions(agents_md: &Option<String>, read_only: bool) -> String {
         s.push_str(md);
     }
     s
+}
+
+fn dirs_config_path(suffix: &str) -> std::path::PathBuf {
+    if let Some(home) = std::env::var_os("HOME") {
+        std::path::PathBuf::from(home).join(".config").join(suffix)
+    } else {
+        std::path::PathBuf::from(suffix)
+    }
 }
 
 async fn load_agents_md(explicit_path: Option<&str>) -> Option<String> {

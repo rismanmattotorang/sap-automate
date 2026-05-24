@@ -14,6 +14,7 @@ that follow from them.
 | **`SAP/mdk-mcp-server`** | github.com/SAP/mdk-mcp-server | Node.js 22+, official SAP project |
 | **`mario-andreschak/mcp-abap-adt`** | github.com/mario-andreschak/mcp-abap-adt | TypeScript, 13 read-only ADT tools |
 | **`fr0ster/mcp-abap-adt`** | github.com/fr0ster/mcp-abap-adt | TypeScript, 60+ tools, full CRUD, RAP-first, multi-transport, "AI Pairing, Not Vibing" |
+| **`marianfoo/sap-ai-mcp-servers`** | github.com/marianfoo/sap-ai-mcp-servers | Meta-registry of 40+ SAP MCP servers, skills, and Claude plugins |
 | SAP Community blog #1 (ABAP add-on for ECC/S4) | community.sap.com | ABAP add-on |
 | SAP Community blog #2 (Mobile MCP) | community.sap.com | SAP announcement, MDK |
 
@@ -98,6 +99,21 @@ that follow from them.
   role-based tool filtering.
 - **"AI Pairing, Not Vibing"** explicit anti-autopilot stance.
 
+### `marianfoo/sap-ai-mcp-servers` (meta-registry, 40+ servers)
+
+- **Skills layer convergence**: across CAP Agentic Engineered Skills,
+  ARC-1 SAP Skills, RAP Skills, SAP Skills for Claude Code, the
+  pattern is the same — **markdown files with YAML frontmatter** wrap
+  tool composition + prompt engineering for a specific workflow.
+  Agents invoke skills, not raw tools.
+- **Config-driven OData proxy**: foundation layer; single JSON +
+  BTP destinations = MCP tool surface for any SAP OData service.
+  Zero code per new system.
+- **Multi-server orchestration**: ADT + GUI + Docs + OData servers
+  used together (read metadata, then act, then verify).
+- **Knowledge-driven decision-making**: documentation MCP servers
+  (SAP Docs MCP, SAP Notes MCP) inform agent choices before execution.
+
 ### "Developing Mobile Apps with AI Agents" blog (SAP, official)
 
 - **AI-agent-first design**: tools designed for agent decision-making,
@@ -132,6 +148,8 @@ that follow from them.
 | **Destination model** | fr0ster | **`AdtDestination` + `AdtAuth` enum** (Basic / Bearer / ServiceKey / Certificate / Mock). Redacted view surfaced as `adt-destination://info` resource |
 | **Handler exposure groups** | fr0ster `exposition: ['readonly', 'high']` | **`ExposurePolicy` enum** + `ToolDescriptor::with_writes()`. Read-only-by-default; `--enable-writes` flips it. **Hides write tools from `tools/list` entirely** so agents don't see what they can't call |
 | **AI-pairing-not-vibing safety stance** | fr0ster | **Multiple lines of defence**: exposure policy + per-call `read_only` flag + per-RFC `read_only` metadata + AGENTS.md guardrails surfaced in handshake + structured error codes |
+| **Operator TUI** | mostly absent in references | **5-tab Ratatui TUI** (Sessions / Tools / KB / RAG / Logs) with live LatencyBreakdown gauge against the 80 ms budget, per-tool P50/P95/P99, KB staleness, structured log tail. Connects via admin endpoint or local synthetic feed for offline ops drills |
+| **Skills layer** | mdk + fr0ster + marianfoo | **`SkillRegistry` auto-discovers markdown skills** from `./skills/`, `./.sap-automate/skills/`, `~/.config/sap-automate/skills/`. Each skill = one MCP prompt. Frontmatter declares required tools (validated at registry time), arguments, tags. 5 starter skills shipped: `sap.skill.period_close_investigation`, `sap.skill.transport_impact_analysis`, `sap.skill.rap_service_scaffolding`, `sap.skill.clean_core_audit`, `sap.skill.abap_code_review` |
 
 ## Architectural moves
 

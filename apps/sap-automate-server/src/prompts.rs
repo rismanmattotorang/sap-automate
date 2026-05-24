@@ -6,16 +6,59 @@
 
 use mcp_core::{GetPromptResult, Prompt, PromptArgument, PromptMessage, Role, ToolContent};
 use mcp_server::{registry::PromptHandler, PromptDescriptor};
+use sap_automate_skills::{Skill, SkillRegistry};
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-pub fn all() -> Vec<PromptDescriptor> {
-    vec![
+pub fn all(skill_registry: &SkillRegistry) -> Vec<PromptDescriptor> {
+    let mut out = vec![
         review_rfc_call(),
         transport_impact_analysis(),
         review_where_used(),
-    ]
+    ];
+    // marianfoo/sap-ai-mcp-servers pattern: skills auto-loaded from disk
+    // become MCP prompts.  Each markdown file = one prompt.
+    for skill in skill_registry.skills() {
+        out.push(skill_as_prompt(skill.clone()));
+    }
+    out
+}
+
+fn skill_as_prompt(skill: Skill) -> PromptDescriptor {
+    let skill_for_handler = skill.clone();
+    struct H(Skill);
+    impl PromptHandler for H {
+        fn get(&self, arguments: Option<serde_json::Value>) -> Pin<Box<dyn Future<Output = mcp_core::Result<GetPromptResult>> + Send + '_>> {
+            let skill = self.0.clone();
+            Box::pin(async move {
+                let arg_map: HashMap<String, String> = match arguments {
+                    Some(serde_json::Value::Object(m)) => m.into_iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_string())))
+                        .collect(),
+                    _ => HashMap::new(),
+                };
+                let body = skill.render(&arg_map);
+                Ok(GetPromptResult {
+                    description: Some(skill.description.clone()),
+                    messages: vec![PromptMessage { role: Role::User, content: ToolContent::text(body) }],
+                })
+            })
+        }
+    }
+    PromptDescriptor {
+        prompt: Prompt {
+            name: skill_for_handler.name.clone(),
+            description: Some(skill_for_handler.description.clone()),
+            arguments: skill_for_handler.arguments.iter().map(|a| PromptArgument {
+                name: a.name.clone(),
+                description: a.description.clone(),
+                required: a.required,
+            }).collect(),
+        },
+        handler: Arc::new(H(skill_for_handler)),
+    }
 }
 
 fn review_where_used() -> PromptDescriptor {

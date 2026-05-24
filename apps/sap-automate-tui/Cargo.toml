@@ -1,0 +1,22 @@
+[package]
+name = "sap-automate-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Phase 4: Ratatui operator terminal UI for the SAP-Automate server."
+
+[[bin]]
+name = "sap-automate-tui"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = { workspace = true }
+crossterm = { workspace = true, features = ["event-stream"] }
+tokio = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sap-automate-rag = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }

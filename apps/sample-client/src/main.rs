@@ -45,6 +45,11 @@ struct Cli {
     /// Read a resource by URI and print it.
     #[arg(long)]
     read_resource: Option<String>,
+
+    /// Instantiate a prompt / skill by name with optional JSON arguments.
+    /// Format: `name` or `name={"k": "v"}`.
+    #[arg(long)]
+    get_prompt: Option<String>,
 }
 
 #[tokio::main]
@@ -117,6 +122,20 @@ async fn main() -> anyhow::Result<()> {
         let r = client.read_resource(uri).await?;
         for c in &r.contents {
             if let Some(text) = &c.text { println!("{text}"); }
+        }
+        println!();
+    }
+
+    if let Some(spec) = cli.get_prompt.as_deref() {
+        let (name, args) = parse_call_spec(spec)?;
+        let arg_val = if matches!(args, serde_json::Value::Object(ref m) if m.is_empty()) { None } else { Some(args) };
+        println!("== Prompt {name}");
+        let result = client.get_prompt(&name, arg_val).await?;
+        if let Some(d) = &result.description { println!("Description: {d}"); }
+        for m in &result.messages {
+            if let mcp_core::ToolContent::Text { text } = &m.content {
+                println!("\n{text}");
+            }
         }
         println!();
     }
