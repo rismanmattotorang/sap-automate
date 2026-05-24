@@ -12,7 +12,7 @@ path = "src/main.rs"
 [dependencies]
 mcp-core = { workspace = true }
 mcp-server = { workspace = true }
-mcp-transport = { workspace = true }
+mcp-transport = { workspace = true, features = ["http"] }
 sap-automate-kb = { workspace = true }
 sap-automate-rag = { workspace = true }
 sap-automate-ingest = { workspace = true }

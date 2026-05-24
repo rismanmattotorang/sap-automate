@@ -148,6 +148,21 @@ impl Server {
 
     pub fn context(&self) -> &Arc<ServerContext> { &self.context }
 
+    /// Dispatch a single message and return the response (if any).
+    /// Notifications and responses return `None`; requests return `Some`.
+    /// Used by transports that own message buffering (HTTP, embed scenarios)
+    /// rather than the stream-driven dispatch loop in `run`.
+    pub async fn dispatch_message(&self, message: Message) -> Option<Message> {
+        match message {
+            Message::Request(req) => Some(Message::Response(self.dispatch(req).await)),
+            Message::Notification(n) => {
+                self.on_notification(n);
+                None
+            }
+            Message::Response(_) => None,
+        }
+    }
+
     /// Drive the MCP dispatch loop over the given transport until EOF or
     /// shutdown.
     pub async fn run<T: Transport>(&self, mut transport: T) -> Result<()> {

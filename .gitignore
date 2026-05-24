@@ -8,3 +8,5 @@ Cargo.lock.bak
 node_modules/
 .next/
 dist/
+.turbo/
+.eslintcache

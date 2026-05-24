@@ -25,7 +25,7 @@ mod prompts;
 
 use clap::Parser;
 use mcp_server::Server;
-use mcp_transport::StdioTransport;
+use mcp_transport::{HttpServerConfig, HttpServerTransport, StdioTransport};
 use sap_automate_adt::{AdtClient, AdtDestination, MockAdtClient};
 use sap_automate_skills::SkillRegistry;
 use sap_automate_ingest::{EmbeddingClient, MockEmbedder};
@@ -70,6 +70,20 @@ struct Cli {
     /// "default" → MockAdtClient. Real wiring (HttpAdtClient) is Phase 7.
     #[arg(long)]
     adt_destination: Option<String>,
+
+    /// Transport: "stdio" (default) or "http".  HTTP mode binds to
+    /// --bind and accepts JSON-RPC POSTs at /mcp plus SSE at /mcp/events
+    /// (paper §IV-C; convergent pattern from fr0ster/mcp-abap-adt).
+    #[arg(long, default_value = "stdio")]
+    transport: String,
+
+    /// HTTP listener bind address (used when --transport=http).
+    #[arg(long, default_value = "127.0.0.1:3030")]
+    bind: String,
+
+    /// Optional bearer token required for HTTP requests.
+    #[arg(long)]
+    bearer_token: Option<String>,
 }
 
 #[tokio::main]
@@ -145,10 +159,33 @@ async fn main() -> anyhow::Result<()> {
         read_only = read_only,
         pool_size = cli.pool_size,
         embedding_dim = cli.embedding_dim,
-        tools = 12,
+        transport = %cli.transport,
         "SAP-Automate server configured"
     );
-    server.run(StdioTransport::from_stdio()).await?;
+
+    match cli.transport.as_str() {
+        "stdio" => server.run(StdioTransport::from_stdio()).await?,
+        "http" => {
+            let bind: std::net::SocketAddr = cli.bind.parse()
+                .map_err(|e| anyhow::anyhow!("invalid --bind '{}': {e}", cli.bind))?;
+            tracing::info!(bind = %bind, "HTTP transport binding");
+            let dispatch_server = server.clone();
+            let handle = HttpServerTransport::serve(
+                HttpServerConfig { bind, bearer_token: cli.bearer_token.clone() },
+                move |msg| {
+                    let server = dispatch_server.clone();
+                    async move { server.dispatch_message(msg).await }
+                },
+            ).await?;
+            tracing::info!("HTTP server ready at http://{bind}/mcp  (events: /mcp/events)");
+            // Run until SIGINT
+            tokio::signal::ctrl_c().await?;
+            handle.shutdown().await;
+        }
+        other => {
+            anyhow::bail!("unknown --transport '{other}' (expected: stdio | http)");
+        }
+    }
     Ok(())
 }
 

@@ -1,0 +1,12 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body { background: #08090b; color: #e7ecf2; }
+
+/* Layout helpers */
+.scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: #2c3340; border-radius: 3px; }
+
+/* Code blocks with subtle SAP-style monospacing */
+pre, code { font-feature-settings: 'liga' 0; }
