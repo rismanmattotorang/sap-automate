@@ -18,8 +18,8 @@ use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 use crate::registry::{
-    PromptDescriptor, PromptHandler, ResourceDescriptor, ResourceHandler, ToolDescriptor,
-    ToolHandler,
+    ExposurePolicy, PromptDescriptor, PromptHandler, ResourceDescriptor, ResourceHandler,
+    ToolDescriptor, ToolHandler,
 };
 
 /// Builder for an MCP server.
@@ -29,6 +29,7 @@ pub struct ServerBuilder {
     tools: HashMap<String, ToolDescriptor>,
     resources: HashMap<String, ResourceDescriptor>,
     prompts: HashMap<String, PromptDescriptor>,
+    exposure: ExposurePolicy,
 }
 
 impl ServerBuilder {
@@ -39,7 +40,16 @@ impl ServerBuilder {
             tools: HashMap::new(),
             resources: HashMap::new(),
             prompts: HashMap::new(),
+            exposure: ExposurePolicy::ReadOnlyOnly,
         }
+    }
+
+    /// Set the tool exposure policy.  Defaults to `ReadOnlyOnly` so write
+    /// tools registered via `with_writes()` are hidden until the operator
+    /// opts in.
+    pub fn exposure(mut self, policy: ExposurePolicy) -> Self {
+        self.exposure = policy;
+        self
     }
 
     pub fn instructions(mut self, text: impl Into<String>) -> Self {
@@ -83,13 +93,21 @@ impl ServerBuilder {
     }
 
     pub fn build(self) -> Server {
+        // Filter tools by exposure policy at build time so list_tools and
+        // call_tool both see the same surface — preventing the agent from
+        // discovering a tool that would then be refused.
+        let policy = self.exposure;
+        let allowed_tools: HashMap<String, ToolDescriptor> = self.tools.into_iter()
+            .filter(|(_, d)| d.is_allowed_by(policy))
+            .collect();
         Server {
             context: Arc::new(ServerContext {
                 info: self.info,
                 instructions: self.instructions,
-                tools: self.tools,
+                tools: allowed_tools,
                 resources: self.resources,
                 prompts: self.prompts,
+                exposure: policy,
             }),
         }
     }
@@ -102,6 +120,7 @@ pub struct ServerContext {
     pub tools: HashMap<String, ToolDescriptor>,
     pub resources: HashMap<String, ResourceDescriptor>,
     pub prompts: HashMap<String, PromptDescriptor>,
+    pub exposure: ExposurePolicy,
 }
 
 impl ServerContext {

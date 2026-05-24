@@ -34,10 +34,32 @@ where
     }
 }
 
+/// Tool exposure group — pattern adopted from `fr0ster/mcp-abap-adt`'s
+/// `IReadOnlyDedupStrategy`.  Lets operators run the same server binary
+/// in a strict read-only mode (group = `ReadOnly`), enable write tools
+/// (`Writes`), or expose everything (`All`).  Defaults to `ReadOnly` for
+/// safety.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolExposure {
+    /// Safe to expose in read-only deployments.
+    ReadOnly,
+    /// Mutates SAP state.
+    Writes,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExposurePolicy {
+    /// Only tools tagged `ReadOnly`.
+    ReadOnlyOnly,
+    /// Read-only + write tools (typical when `--enable-writes` is set).
+    All,
+}
+
 #[derive(Clone)]
 pub struct ToolDescriptor {
     pub tool: Tool,
     pub handler: Arc<dyn ToolHandler>,
+    pub exposure: ToolExposure,
 }
 
 impl ToolDescriptor {
@@ -48,12 +70,23 @@ impl ToolDescriptor {
         handler: Arc<dyn ToolHandler>,
     ) -> Self {
         Self {
-            tool: Tool {
-                name: name.into(),
-                description,
-                input_schema,
-            },
+            tool: Tool { name: name.into(), description, input_schema },
             handler,
+            exposure: ToolExposure::ReadOnly,
+        }
+    }
+
+    /// Builder-style mutator: mark this tool as writing to SAP state.
+    pub fn with_writes(mut self) -> Self {
+        self.exposure = ToolExposure::Writes;
+        self
+    }
+
+    pub fn is_allowed_by(&self, policy: ExposurePolicy) -> bool {
+        match (policy, self.exposure) {
+            (ExposurePolicy::ReadOnlyOnly, ToolExposure::ReadOnly) => true,
+            (ExposurePolicy::ReadOnlyOnly, ToolExposure::Writes) => false,
+            (ExposurePolicy::All, _) => true,
         }
     }
 }

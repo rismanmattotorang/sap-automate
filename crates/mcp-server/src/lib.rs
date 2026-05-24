@@ -14,6 +14,7 @@ mod server;
 pub use registry::{
     ToolHandler, ToolFn, ResourceHandler, PromptHandler,
     ToolDescriptor, ResourceDescriptor, PromptDescriptor,
+    ToolExposure, ExposurePolicy,
 };
 pub use server::{Server, ServerBuilder, ServerContext};
 

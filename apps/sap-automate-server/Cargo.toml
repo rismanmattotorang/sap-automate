@@ -17,6 +17,7 @@ sap-automate-kb = { workspace = true }
 sap-automate-rag = { workspace = true }
 sap-automate-ingest = { workspace = true }
 sap-automate-rfc = { workspace = true }
+sap-automate-adt = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

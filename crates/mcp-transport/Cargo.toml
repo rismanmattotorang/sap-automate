@@ -12,7 +12,13 @@ async-trait = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 futures = { workspace = true }
+axum = { workspace = true, optional = true }
+tower-http = { workspace = true, optional = true }
 
 [features]
 default = []
-http = []
+http = ["axum", "tower-http"]
+
+[dev-dependencies]
+mcp-core = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

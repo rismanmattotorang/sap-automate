@@ -26,6 +26,7 @@ mod prompts;
 use clap::Parser;
 use mcp_server::Server;
 use mcp_transport::StdioTransport;
+use sap_automate_adt::{AdtClient, AdtDestination, MockAdtClient};
 use sap_automate_ingest::{EmbeddingClient, MockEmbedder};
 use sap_automate_kb::{InMemoryKb, KnowledgeStore};
 use sap_automate_rag::RagEngine;
@@ -63,6 +64,11 @@ struct Cli {
     /// Embedding vector dimension for the in-memory KB.
     #[arg(long, default_value_t = 256)]
     embedding_dim: usize,
+
+    /// ADT destination name (fr0ster/mcp-abap-adt pattern). Defaults to
+    /// "default" → MockAdtClient. Real wiring (HttpAdtClient) is Phase 7.
+    #[arg(long)]
+    adt_destination: Option<String>,
 }
 
 #[tokio::main]
@@ -102,6 +108,10 @@ async fn main() -> anyhow::Result<()> {
 
     let sap_client: Arc<dyn SapClient> = MockSapClient::new(cli.pool_size, creds.redacted());
 
+    // ADT client — defaults to MockAdtClient so the binary runs offline.
+    let adt_destination = AdtDestination::mock(cli.adt_destination.clone().unwrap_or_else(|| "default".into()));
+    let adt_client: Arc<dyn AdtClient> = MockAdtClient::new(adt_destination);
+
     // AGENTS.md guardrails.
     let agents_md = load_agents_md(cli.agents_md.as_deref()).await;
 
@@ -109,6 +119,7 @@ async fn main() -> anyhow::Result<()> {
         rag,
         embedder,
         sap_client,
+        adt_client,
         read_only,
         agents_md: agents_md.clone(),
     });
@@ -126,14 +137,24 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn build_server(ctx: Arc<ServerContext>, agents_md: &Option<String>, read_only: bool) -> Server {
+    let policy = if read_only {
+        mcp_server::ExposurePolicy::ReadOnlyOnly
+    } else {
+        mcp_server::ExposurePolicy::All
+    };
     let mut builder = Server::builder("sap-automate-server", env!("CARGO_PKG_VERSION"))
+        .exposure(policy)
         .instructions(build_instructions(agents_md, read_only));
 
-    // Existing RAG tools (Phase 1 + 1A).
+    // Existing RAG tools (Phase 1 + 1A) — all read-only.
     for desc in tools::rag_tools(&ctx) { builder = builder.tool(desc); }
 
-    // New SAP tools (Phase 2).
+    // RFC + table tools (Phase 2).
     for desc in tools::sap_tools(&ctx) { builder = builder.tool(desc); }
+
+    // ADT tools (Phase 2 finalisation — informed by mario-andreschak +
+    // fr0ster/mcp-abap-adt).
+    for desc in tools::adt_tools(&ctx) { builder = builder.tool(desc); }
 
     // Resources.
     for desc in resources::all(&ctx) { builder = builder.resource(desc); }
@@ -147,13 +168,13 @@ fn build_server(ctx: Arc<ServerContext>, agents_md: &Option<String>, read_only: 
 fn build_instructions(agents_md: &Option<String>, read_only: bool) -> String {
     let mut s = String::new();
     s.push_str(
-        "SAP-Automate MCP server (Phase 2).\n\
-         Tools: abap.search, bpmn.find_process, eam.search_apps, sap.help.search, \
-         sap.system.info, sap.rfc.search, sap.rfc.metadata, sap.rfc.bulk_metadata, \
-         sap.rfc.call, sap.table.read, sap.table.structure, sap.docs.search.\n\
-         Resources: sap-system://info, sap-table://{name}/structure, sap-rfc://{name}, \
-         agents://guardrails.\n\
-         Prompts: sap.review-rfc-call, sap.transport-impact-analysis.\n",
+        "SAP-Automate MCP server (Phase 2 + ADT). Tool groups:\n\
+         - RAG search: abap.search, bpmn.find_process, eam.search_apps, sap.help.search, sap.docs.search.\n\
+         - RFC + tables: sap.system.info, sap.rfc.search, sap.rfc.metadata, sap.rfc.bulk_metadata, sap.rfc.call, sap.table.read, sap.table.structure.\n\
+         - ABAP ADT (read-only): abap.adt.get_program, abap.adt.get_class, abap.adt.get_function_module, abap.adt.get_interface, abap.adt.get_include, abap.adt.get_package_contents, abap.adt.get_cds_view, abap.adt.where_used, abap.adt.search, abap.adt.get_table_contents.\n\
+         - ABAP ADT (write): abap.adt.activate (hidden in read-only mode).\n\
+         Resources: sap-system://info, sap-rfc://{name}, sap-table://{name}/structure, adt-destination://info, agents://guardrails.\n\
+         Prompts: sap.review-rfc-call, sap.transport-impact-analysis, abap.review-where-used.\n",
     );
     if read_only {
         s.push_str("Mode: READ-ONLY. Write-side RFCs (e.g. BAPI_SALESORDER_CREATEFROMDAT2, BAPI_ACC_DOCUMENT_POST) are blocked. Pass --enable-writes to allow.\n");

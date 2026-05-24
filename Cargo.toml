@@ -12,6 +12,7 @@ members = [
     "crates/sap-automate-memory",
     "crates/sap-automate-ingest",
     "crates/sap-automate-rfc",
+    "crates/sap-automate-adt",
     "apps/sap-automate-server",
     "apps/sap-automate-ingest",
     "apps/sample-server",
@@ -57,6 +58,12 @@ sap-automate-skills = { path = "crates/sap-automate-skills" }
 sap-automate-memory = { path = "crates/sap-automate-memory" }
 sap-automate-ingest = { path = "crates/sap-automate-ingest" }
 sap-automate-rfc = { path = "crates/sap-automate-rfc" }
+sap-automate-adt = { path = "crates/sap-automate-adt" }
+axum = "0.7"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors"] }
+quick-xml = { version = "0.36", features = ["serialize"] }
+toml = "0.8"
 
 # HTTP / web (Phase 1A)
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }

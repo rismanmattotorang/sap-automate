@@ -51,6 +51,16 @@ cargo run --release -p sample-client -- --server target/release/sap-automate-ser
 cargo run --release -p sample-client -- --server target/release/sap-automate-server \
     --server-arg=--enable-writes \
     --call 'sap.rfc.call={"function":"BAPI_ACC_DOCUMENT_POST","parameters":{"DOCUMENTHEADER":{}}}'
+
+# Demo 6 (Phase 2 ADT): ABAP source retrieval + impact analysis
+cargo run --release -p sample-client -- --server target/release/sap-automate-server \
+    --call 'abap.adt.get_class={"name":"ZCL_FIN_POSTER"}'
+cargo run --release -p sample-client -- --server target/release/sap-automate-server \
+    --call 'abap.adt.where_used={"name":"ZIF_FIN_POSTABLE","kind":"interface"}'
+
+# Demo 7 (Phase 2 ADT): BTP data-preview block surfaces fallback advice
+cargo run --release -p sample-client -- --server target/release/sap-automate-server \
+    --call 'abap.adt.get_table_contents={"table":"BSEG","max_rows":10}'
 ```
 
 See [`docs/COMPARISON.md`](docs/COMPARISON.md) for the comparative analysis

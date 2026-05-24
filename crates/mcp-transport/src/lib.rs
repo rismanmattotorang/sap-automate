@@ -9,9 +9,11 @@ use mcp_core::{Message, Result};
 
 pub mod stdio;
 #[cfg(feature = "http")]
-pub mod http_sse;
+pub mod http;
 
 pub use stdio::StdioTransport;
+#[cfg(feature = "http")]
+pub use http::{HttpServerTransport, HttpServerHandle, HttpServerConfig};
 
 /// Bidirectional, framed MCP transport.
 ///

@@ -41,10 +41,40 @@ pub fn all(ctx: &Arc<ServerContext>) -> Vec<ResourceDescriptor> {
         out.push(make_rfc_meta(ctx, rfc));
     }
 
+    out.push(make_adt_destination(ctx));
+
     if ctx.agents_md.is_some() {
         out.push(make_agents_md(ctx));
     }
     out
+}
+
+fn make_adt_destination(ctx: &Arc<ServerContext>) -> ResourceDescriptor {
+    struct H(Arc<ServerContext>);
+    impl ResourceHandler for H {
+        fn read(&self, uri: &str) -> Pin<Box<dyn Future<Output = mcp_core::Result<ReadResourceResult>> + Send + '_>> {
+            let uri = uri.to_string();
+            let dest = self.0.adt_client.destination().redacted();
+            Box::pin(async move {
+                let text = serde_json::to_string_pretty(&dest).map_err(Error::Json)?;
+                Ok(ReadResourceResult {
+                    contents: vec![ResourceContents {
+                        uri, mime_type: Some("application/json".into()),
+                        text: Some(text), blob: None,
+                    }],
+                })
+            })
+        }
+    }
+    ResourceDescriptor {
+        resource: Resource {
+            uri: "adt-destination://info".into(),
+            name: "ADT destination".into(),
+            description: Some("Redacted view of the configured ABAP Development Tools destination (name, base URL, client, language, auth type).".into()),
+            mime_type: Some("application/json".into()),
+        },
+        handler: Arc::new(H(Arc::clone(ctx))),
+    }
 }
 
 fn make_system_info(ctx: &Arc<ServerContext>) -> ResourceDescriptor {

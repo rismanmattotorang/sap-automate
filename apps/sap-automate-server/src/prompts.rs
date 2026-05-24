@@ -14,7 +14,40 @@ pub fn all() -> Vec<PromptDescriptor> {
     vec![
         review_rfc_call(),
         transport_impact_analysis(),
+        review_where_used(),
     ]
+}
+
+fn review_where_used() -> PromptDescriptor {
+    struct H;
+    impl PromptHandler for H {
+        fn get(&self, arguments: Option<serde_json::Value>) -> Pin<Box<dyn Future<Output = mcp_core::Result<GetPromptResult>> + Send + '_>> {
+            let args = arguments.unwrap_or(serde_json::Value::Object(Default::default()));
+            let object = args.get("object").and_then(|v| v.as_str()).unwrap_or("<OBJECT>").to_string();
+            let kind = args.get("kind").and_then(|v| v.as_str()).unwrap_or("Class").to_string();
+            Box::pin(async move {
+                let body = format!(
+                    "Before changing or deleting {kind} {object}, run abap.adt.where_used and reason carefully about the impact.\n\nSteps:\n1. Call abap.adt.where_used with name={object}, kind={} to enumerate every caller / implementer / include site.\n2. For each hit, group by ownership (package, application) using abap.adt.get_package_contents on the parent.\n3. Identify which of those callers are themselves on a hot path (use abap.docs.search to cross-reference business processes via BPMN).\n4. Produce a 3-section report: Direct callers, Indirect dependents, Recommended pre-change checks (regression tests, transports to coordinate).\n\nCite every claim by its source URI (sap-rfc://, sap-table://, or sap-help://).",
+                    kind.to_lowercase(),
+                );
+                Ok(GetPromptResult {
+                    description: Some("Where-used review before changing or deleting an ABAP object.".into()),
+                    messages: vec![PromptMessage { role: Role::User, content: ToolContent::text(body) }],
+                })
+            })
+        }
+    }
+    PromptDescriptor {
+        prompt: Prompt {
+            name: "abap.review-where-used".into(),
+            description: Some("Walk the agent through a where-used analysis before changing an ABAP object.".into()),
+            arguments: vec![
+                PromptArgument { name: "object".into(), description: Some("Object name".into()), required: true },
+                PromptArgument { name: "kind".into(), description: Some("Object kind (class | interface | program | ...)".into()), required: false },
+            ],
+        },
+        handler: Arc::new(H),
+    }
 }
 
 fn review_rfc_call() -> PromptDescriptor {

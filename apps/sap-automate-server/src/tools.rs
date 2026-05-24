@@ -12,6 +12,9 @@
 use crate::context::ServerContext;
 use mcp_core::{CallToolResult, ToolContent, ToolInputSchema};
 use mcp_server::{registry::ToolFn, ToolDescriptor};
+use sap_automate_adt::{
+    AbapObjectKind, AdtCallContext, AdtSearchRequest, ActivationRequest, WhereUsedRequest,
+};
 use sap_automate_kb::Domain;
 use sap_automate_rag::Query;
 use sap_automate_rfc::{
@@ -411,6 +414,354 @@ fn tool_docs_search(ctx: &Arc<ServerContext>) -> ToolDescriptor {
         })),
         Arc::new(handler),
     )
+}
+
+// ===========================================================================
+// ADT tools (Phase 2 finalisation — informed by mcp-abap-adt projects)
+// ===========================================================================
+
+pub fn adt_tools(ctx: &Arc<ServerContext>) -> Vec<ToolDescriptor> {
+    vec![
+        adt_get_program(ctx),
+        adt_get_class(ctx),
+        adt_get_interface(ctx),
+        adt_get_include(ctx),
+        adt_get_function_module(ctx),
+        adt_get_package_contents(ctx),
+        adt_get_cds_view(ctx),
+        adt_search(ctx),
+        adt_where_used(ctx),
+        adt_get_table_contents(ctx),
+        adt_activate(ctx), // write — hidden in read-only mode by exposure policy
+    ]
+}
+
+#[derive(Deserialize)]
+struct NameArgs { name: String }
+
+fn name_schema() -> ToolInputSchema {
+    ToolInputSchema::from_value(serde_json::json!({
+        "type": "object",
+        "properties": {"name": {"type": "string", "description": "ABAP object name"}},
+        "required": ["name"],
+        "additionalProperties": false,
+    }))
+}
+
+fn adt_get_program(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            let args: NameArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("abap.adt.get_program: {e}"))),
+            };
+            match ctx.adt_client.get_program(&args.name).await {
+                Ok(p) => render_json("abap.adt.get_program", &p),
+                Err(e) => Ok(CallToolResult::error(format!("abap.adt.get_program [{:?}]: {e}", e.code()))),
+            }
+        }
+    });
+    ToolDescriptor::new("abap.adt.get_program",
+        Some("Retrieve ABAP program source by name via ADT REST. Returns source, line count, active flag.".into()),
+        name_schema(), Arc::new(handler))
+}
+
+fn adt_get_class(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            let args: NameArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("abap.adt.get_class: {e}"))),
+            };
+            match ctx.adt_client.get_class(&args.name).await {
+                Ok(p) => render_json("abap.adt.get_class", &p),
+                Err(e) => Ok(CallToolResult::error(format!("abap.adt.get_class [{:?}]: {e}", e.code()))),
+            }
+        }
+    });
+    ToolDescriptor::new("abap.adt.get_class",
+        Some("Retrieve ABAP class source via ADT.".into()),
+        name_schema(), Arc::new(handler))
+}
+
+fn adt_get_interface(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            let args: NameArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("abap.adt.get_interface: {e}"))),
+            };
+            match ctx.adt_client.get_interface(&args.name).await {
+                Ok(p) => render_json("abap.adt.get_interface", &p),
+                Err(e) => Ok(CallToolResult::error(format!("abap.adt.get_interface [{:?}]: {e}", e.code()))),
+            }
+        }
+    });
+    ToolDescriptor::new("abap.adt.get_interface",
+        Some("Retrieve ABAP interface source via ADT.".into()),
+        name_schema(), Arc::new(handler))
+}
+
+fn adt_get_include(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            let args: NameArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("abap.adt.get_include: {e}"))),
+            };
+            match ctx.adt_client.get_include(&args.name).await {
+                Ok(p) => render_json("abap.adt.get_include", &p),
+                Err(e) => Ok(CallToolResult::error(format!("abap.adt.get_include [{:?}]: {e}", e.code()))),
+            }
+        }
+    });
+    ToolDescriptor::new("abap.adt.get_include",
+        Some("Retrieve ABAP include source via ADT.".into()),
+        name_schema(), Arc::new(handler))
+}
+
+#[derive(Deserialize)]
+struct FmArgs { group: String, name: String }
+
+fn adt_get_function_module(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            let args: FmArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("abap.adt.get_function_module: {e}"))),
+            };
+            match ctx.adt_client.get_function_module(&args.group, &args.name).await {
+                Ok(p) => render_json("abap.adt.get_function_module", &p),
+                Err(e) => Ok(CallToolResult::error(format!("abap.adt.get_function_module [{:?}]: {e}", e.code()))),
+            }
+        }
+    });
+    ToolDescriptor::new("abap.adt.get_function_module",
+        Some("Retrieve ABAP function module source. Requires both function group and module name (the ADT URL nests them).".into()),
+        ToolInputSchema::from_value(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "group": {"type": "string", "description": "Function group, e.g. ZFIN_UTIL"},
+                "name": {"type": "string", "description": "Function module name, e.g. Z_FIN_VALIDATE_BUKRS"}
+            },
+            "required": ["group", "name"],
+            "additionalProperties": false,
+        })),
+        Arc::new(handler))
+}
+
+#[derive(Deserialize)]
+struct PackageArgs { package: String }
+
+fn adt_get_package_contents(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            let args: PackageArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("abap.adt.get_package_contents: {e}"))),
+            };
+            match ctx.adt_client.get_package_contents(&args.package).await {
+                Ok(c) => render_json("abap.adt.get_package_contents", &c),
+                Err(e) => Ok(CallToolResult::error(format!("abap.adt.get_package_contents [{:?}]: {e}", e.code()))),
+            }
+        }
+    });
+    ToolDescriptor::new("abap.adt.get_package_contents",
+        Some("List the objects under an ABAP package (programs, classes, interfaces, CDS views, ...).".into()),
+        ToolInputSchema::from_value(serde_json::json!({
+            "type": "object",
+            "properties": {"package": {"type": "string"}},
+            "required": ["package"],
+            "additionalProperties": false,
+        })),
+        Arc::new(handler))
+}
+
+fn adt_get_cds_view(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            let args: NameArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("abap.adt.get_cds_view: {e}"))),
+            };
+            match ctx.adt_client.get_cds_view(&args.name).await {
+                Ok(v) => render_json("abap.adt.get_cds_view", &v),
+                Err(e) => Ok(CallToolResult::error(format!("abap.adt.get_cds_view [{:?}]: {e}", e.code()))),
+            }
+        }
+    });
+    ToolDescriptor::new("abap.adt.get_cds_view",
+        Some("Retrieve a Core Data Services (CDS) view source via ADT.".into()),
+        name_schema(), Arc::new(handler))
+}
+
+#[derive(Deserialize)]
+struct AdtSearchArgs {
+    query: String,
+    #[serde(default)]
+    kind: Option<AbapObjectKind>,
+    #[serde(default = "default_max_results")]
+    max_results: usize,
+}
+
+fn default_max_results() -> usize { 25 }
+
+fn adt_search(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            let args: AdtSearchArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("abap.adt.search: {e}"))),
+            };
+            let req = AdtSearchRequest { query: args.query, kind: args.kind, max_results: args.max_results };
+            match ctx.adt_client.search(req).await {
+                Ok(hits) => render_json("abap.adt.search", &serde_json::json!({"hits": hits})),
+                Err(e) => Ok(CallToolResult::error(format!("abap.adt.search [{:?}]: {e}", e.code()))),
+            }
+        }
+    });
+    ToolDescriptor::new("abap.adt.search",
+        Some("Live ABAP object search via ADT (different from abap.search which queries the RAG-indexed corpus). Constrained kind enum.".into()),
+        ToolInputSchema::from_value(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "kind": {"type": "string", "enum": [
+                    "program","class","interface","include","function_group","function_module",
+                    "table","structure","data_element","domain","package","cds_view",
+                    "behavior_definition","service_definition","metadata_extension",
+                    "enhancement_spot","transaction"
+                ]},
+                "max_results": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25}
+            },
+            "required": ["query"],
+            "additionalProperties": false,
+        })),
+        Arc::new(handler))
+}
+
+#[derive(Deserialize)]
+struct WhereUsedArgs { name: String, kind: AbapObjectKind }
+
+fn adt_where_used(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            let args: WhereUsedArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("abap.adt.where_used: {e}"))),
+            };
+            let req = WhereUsedRequest { name: args.name, kind: args.kind };
+            match ctx.adt_client.where_used(req).await {
+                Ok(hits) => render_json("abap.adt.where_used", &serde_json::json!({"hits": hits})),
+                Err(e) => Ok(CallToolResult::error(format!("abap.adt.where_used [{:?}]: {e}", e.code()))),
+            }
+        }
+    });
+    ToolDescriptor::new("abap.adt.where_used",
+        Some("Impact analysis: list places that use a given ABAP object. Returns object name, kind, location, and usage type (implements / call / include / etc.).".into()),
+        ToolInputSchema::from_value(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "kind": {"type": "string", "enum": [
+                    "program","class","interface","include","function_group","function_module",
+                    "table","structure","data_element","domain","package","cds_view"
+                ]}
+            },
+            "required": ["name", "kind"],
+            "additionalProperties": false,
+        })),
+        Arc::new(handler))
+}
+
+#[derive(Deserialize)]
+struct TableContentsArgs { table: String, #[serde(default = "default_max_rows_100")] max_rows: usize }
+fn default_max_rows_100() -> usize { 100 }
+
+fn adt_get_table_contents(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            let args: TableContentsArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("abap.adt.get_table_contents: {e}"))),
+            };
+            match ctx.adt_client.get_table_contents(&args.table, args.max_rows).await {
+                Ok(rows) => render_json("abap.adt.get_table_contents", &serde_json::json!({
+                    "rows": rows, "count": rows.len()
+                })),
+                Err(e) => Ok(CallToolResult::error(format!("abap.adt.get_table_contents [{:?}]: {e}", e.code()))),
+            }
+        }
+    });
+    ToolDescriptor::new("abap.adt.get_table_contents",
+        Some("Table data via the ADT Data Preview API. Some tables are blocked on SAP BTP backends — error code DataPreviewBlocked tells the agent to fall back to sap.table.read (RFC).".into()),
+        ToolInputSchema::from_value(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "table": {"type": "string"},
+                "max_rows": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100}
+            },
+            "required": ["table"],
+            "additionalProperties": false,
+        })),
+        Arc::new(handler))
+}
+
+#[derive(Deserialize)]
+struct ActivateArgs { name: String, kind: AbapObjectKind }
+
+fn adt_activate(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            let args: ActivateArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("abap.adt.activate: {e}"))),
+            };
+            let req = ActivationRequest { name: args.name, kind: args.kind };
+            let call_ctx = AdtCallContext { read_only: ctx.read_only };
+            match ctx.adt_client.activate(req, call_ctx).await {
+                Ok(outcome) => render_json("abap.adt.activate", &outcome),
+                Err(e) => Ok(CallToolResult::error(format!("abap.adt.activate [{:?}]: {e}", e.code()))),
+            }
+        }
+    });
+    ToolDescriptor::new("abap.adt.activate",
+        Some("Activate an ABAP object (state-mutating). Hidden in read-only mode by the server exposure policy. When exposed, it still re-checks the per-request read-only flag.".into()),
+        ToolInputSchema::from_value(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "kind": {"type": "string", "enum": [
+                    "program","class","interface","function_group","function_module","cds_view"
+                ]}
+            },
+            "required": ["name", "kind"],
+            "additionalProperties": false,
+        })),
+        Arc::new(handler))
+        .with_writes()
 }
 
 // ===========================================================================

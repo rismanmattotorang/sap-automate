@@ -45,7 +45,7 @@ sap-automate/
 |---|---|---|---|---|
 | **P1**  | 1–4  | Rust MCP server: JSON-RPC, transports, capability router, basic auth | MCP conformance against stub backend | **✅ done** |
 | **P1A** | 1–3 (∥)  | Postgres + Qdrant schema; SAP Help crawler; 10k-page pilot | end-to-end vector search returns Help pages | **✅ done (pilot scale)** |
-| **P2**  | 5–8  | ADT + Signavio + LeanIX clients wired as MCP tools | typed tools live | **✅ done (mock backend; SapClient trait ready for real RFC binding)** |
+| **P2**  | 5–8  | ADT + Signavio + LeanIX clients wired as MCP tools | typed tools live | **✅ extended**: 10 ADT tools (mario-andreschak coverage + fr0ster's where-used/CDS), `AdtClient` trait with `MockAdtClient` (offline) and `HttpAdtClient` (live, CSRF cache). Signavio + LeanIX clients land in Phase 5 |
 | P3  | 9–12 | Hybrid RAG (dense + sparse) + RRF fusion + cross-encoder reranker | P95 hybrid retrieval < 80 ms | |
 | P3A | 12–15 (∥) | Contextual retrieval enrichment + SPLADE + parent-child expansion | P95 < 100 ms with reranking | |
 | P4  | 13–16 | Ratatui TUI: Sessions / Tools / KB / RAG / Logs tabs | operators hold the latency budget visible | |

@@ -9,11 +9,13 @@ that follow from them.
 
 | Project | Source | Stack |
 |---|---|---|
-| **`thupalo/sap-rfc-mcp-server`** | github.com/thupalo/sap-rfc-mcp-server | Python 3.9+, pyrfc, Anthropic SDK |
+| **`thupalo/sap-rfc-mcp-server`** | github.com/thupalo/sap-rfc-mcp-server | Python 3.9+, pyrfc |
 | **`CDataSoftware/sap-erp-mcp-server`** | github.com/CDataSoftware/sap-erp-mcp-server-by-cdata | Java, JDBC, CData driver |
 | **`SAP/mdk-mcp-server`** | github.com/SAP/mdk-mcp-server | Node.js 22+, official SAP project |
-| SAP Community: "MCP Server for SAP ECC & S/4HANA – Unlimited ABAP add-on" | community.sap.com | ABAP add-on |
-| SAP Community: "Developing Mobile Apps with AI Agents – Introducing the MCP Server for Mobile" | community.sap.com | SAP announcement, MDK |
+| **`mario-andreschak/mcp-abap-adt`** | github.com/mario-andreschak/mcp-abap-adt | TypeScript, 13 read-only ADT tools |
+| **`fr0ster/mcp-abap-adt`** | github.com/fr0ster/mcp-abap-adt | TypeScript, 60+ tools, full CRUD, RAP-first, multi-transport, "AI Pairing, Not Vibing" |
+| SAP Community blog #1 (ABAP add-on for ECC/S4) | community.sap.com | ABAP add-on |
+| SAP Community blog #2 (Mobile MCP) | community.sap.com | SAP announcement, MDK |
 
 ## Best ideas drawn per project
 
@@ -67,6 +69,35 @@ that follow from them.
   `AbapBridgeSapClient` can be a drop-in replacement, routing tool calls
   through an in-SAP HTTP endpoint backed by ABAP.
 
+### `mario-andreschak/mcp-abap-adt`
+
+- **13 read-only ADT tools** with crisp object-type-specific signatures:
+  `GetProgram`, `GetClass`, `GetFunctionGroup`, `GetFunction`,
+  `GetStructure`, `GetTable`, `GetTableContents`, `GetPackage`,
+  `GetTypeInfo`, `GetInclude`, `SearchObject`, `GetInterface`,
+  `GetTransaction`.
+- **ADT REST** (`/sap/bc/adt/...`) over HTTPS — the modern ABAP
+  integration surface (no RFC SDK on the build host).
+- **Basic auth + `.env` config**, deliberately simple and easy to deploy.
+
+### `fr0ster/mcp-abap-adt`
+
+- **Near-rewrite with 60+ tools and full CRUD** for Class / Interface /
+  CDS View / Program / Function Group / Function Module / Domain /
+  Data Element / Table / Structure.
+- **RAP-first**: BDEF / DDLX / Service Definition / Metadata Extension
+  as first-class CRUD targets.
+- **Where-used analysis**, **AST + semantic introspection**, **transport
+  management** (`CreateTransport`, `ActivateObject`), **runtime
+  diagnostics** (profiler traces, dumps, gateway error log).
+- **3 transports** (stdio, HTTP, SSE), **5 auth schemes** (Basic, JWT,
+  Service Key, mTLS, Kerberos), **destination model** with named
+  service-key files.
+- **Embeddable server pattern** for SAP CAP / Express integration.
+- **Handler exposure groups** (`exposition: ['readonly', 'high']`) —
+  role-based tool filtering.
+- **"AI Pairing, Not Vibing"** explicit anti-autopilot stance.
+
 ### "Developing Mobile Apps with AI Agents" blog (SAP, official)
 
 - **AI-agent-first design**: tools designed for agent decision-making,
@@ -76,10 +107,10 @@ that follow from them.
 
 ## Where SAP-Automate now improves on the references
 
-| Concern | Reference behaviour | SAP-Automate (Phase 2) |
+| Concern | Reference behaviour | SAP-Automate (Phase 2 + ADT) |
 |---|---|---|
 | **Language** | Python / Java / Node | **Rust** — 5–20× faster cold-start, native binary, no runtime dependency |
-| **Tool surface** | 3 (CData), 4 (MDK), 13 (RFC) | **12** spanning RFC + tables + RAG + cross-domain docs |
+| **Tool surface** | 3 (CData), 4 (MDK), 13 (RFC), 13 (mario-andreschak), 60+ (fr0ster) | **22 tools + 3 prompts**: RAG (5) + RFC/tables (7) + ADT (10) — covers the union of the two strongest reference surfaces with read-only-by-default safety |
 | **Error model** | text strings (RFC server) | **Structured error taxonomy** (RFC_TIMEOUT, RFC_AUTH_FAILED, RFC_NOT_FOUND, TABLE_BUFFER_OVERFLOW, …) mapped to MCP JSON-RPC codes |
 | **Transient vs permanent classification** | none | Encoded in `RfcError::is_transient()`; `retry_with_backoff` only retries transients |
 | **Circuit breaker** | none | `CircuitBreaker` with configurable threshold and open-duration |
@@ -93,7 +124,14 @@ that follow from them.
 | **Constrained-enum params** | mdk-mcp pattern | Used in `sap.docs.search` (`domain` ∈ {all, sap_help, abap, bpmn, leanix}) and prepared for tool catalogue expansion |
 | **Schema validation** | declarative JSON schema | **Same** — every tool emits a complete JSON Schema with `additionalProperties: false` |
 | **Knowledge integration** | none (RFC server: opaque) | **First-class RAG layer**: `sap.docs.search` returns cited snippets across Help Portal, ABAP, BPMN, LeanIX, all from `sap-automate-rag` (Phase 1A) |
-| **In-process testability** | low | High — `MockSapClient` ships in the same crate, used by 14 unit tests and 2 integration tests |
+| **In-process testability** | low | High — `MockSapClient` + `MockAdtClient` ship alongside the live backends, used by 22 unit tests and 4 integration tests |
+| **ADT REST integration** | mario-andreschak yes (read-only), fr0ster yes (CRUD) | **`AdtClient` trait** with `MockAdtClient` (offline) and `HttpAdtClient` (CSRF cache + cookie jar + base64 inliner — no extra deps). Read-only-by-default; write tools gated by exposure policy |
+| **Where-used / impact analysis** | fr0ster yes | **`abap.adt.where_used` tool** + `abap.review-where-used` prompt. Mock client ships realistic dependency graphs (interface → class → program → include) so the impact-analysis story is demonstrable offline |
+| **CDS / RAP** | fr0ster yes | **`abap.adt.get_cds_view` tool** with structured annotation extraction. RAP BDEF / DDLX / Service Def slots in via the trait when production wiring lands |
+| **Transports** | stdio / HTTP / SSE (fr0ster) | **stdio (now)** + **HTTP/SSE transport** (`HttpServerTransport`) under the `http` feature with bearer-token auth and SSE event bus |
+| **Destination model** | fr0ster | **`AdtDestination` + `AdtAuth` enum** (Basic / Bearer / ServiceKey / Certificate / Mock). Redacted view surfaced as `adt-destination://info` resource |
+| **Handler exposure groups** | fr0ster `exposition: ['readonly', 'high']` | **`ExposurePolicy` enum** + `ToolDescriptor::with_writes()`. Read-only-by-default; `--enable-writes` flips it. **Hides write tools from `tools/list` entirely** so agents don't see what they can't call |
+| **AI-pairing-not-vibing safety stance** | fr0ster | **Multiple lines of defence**: exposure policy + per-call `read_only` flag + per-RFC `read_only` metadata + AGENTS.md guardrails surfaced in handshake + structured error codes |
 
 ## Architectural moves
 
