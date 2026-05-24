@@ -37,7 +37,25 @@ cargo run --release --bin sap-automate-ingest -- \
     --backend qdrant --qdrant-url http://localhost:6333 \
     --embedder openai --openai-model text-embedding-3-large --embedding-dim 3072 \
     --verify-query "period close foreign currency revaluation"
+
+# Demo 4 (Phase 2): list + read resources + call SAP RFC tools
+cargo run --release -p sample-client -- --server target/release/sap-automate-server --list
+cargo run --release -p sample-client -- --server target/release/sap-automate-server \
+    --read-resource 'sap-rfc://BAPI_MATERIAL_GET_DETAIL'
+cargo run --release -p sample-client -- --server target/release/sap-automate-server \
+    --call 'sap.table.read={"table":"T001","fields":["BUKRS","BUTXT","WAERS"],"where_conditions":["WAERS = '"'"'EUR'"'"'"]}'
+
+# Demo 5: read-only safety gate; flip with --enable-writes
+cargo run --release -p sample-client -- --server target/release/sap-automate-server \
+    --call 'sap.rfc.call={"function":"BAPI_ACC_DOCUMENT_POST","parameters":{}}'
+cargo run --release -p sample-client -- --server target/release/sap-automate-server \
+    --server-arg=--enable-writes \
+    --call 'sap.rfc.call={"function":"BAPI_ACC_DOCUMENT_POST","parameters":{"DOCUMENTHEADER":{}}}'
 ```
+
+See [`docs/COMPARISON.md`](docs/COMPARISON.md) for the comparative analysis
+against `thupalo/sap-rfc-mcp-server`, `CDataSoftware/sap-erp-mcp-server`,
+and `SAP/mdk-mcp-server`.
 
 Expected output:
 
@@ -83,12 +101,15 @@ abap.search: 1 hit(s) for "material master"
 | `mcp-transport` | Transport trait + stdio (HTTP transports next) |
 | `mcp-server` | Server builder, capability router, dispatch loop |
 | `mcp-client` | Async client with request/response correlation |
-| `sap-automate-kb` | Document schema + in-memory KB (Qdrant next) |
+| `sap-automate-kb` | Document + chunk schema, `KnowledgeStore` trait, InMemory + Qdrant backends |
 | `sap-automate-rag` | Layered RAG engine (L2 hybrid now) |
-| `sap-automate-connectors` | Connector traits (ADT/Signavio/LeanIX clients next) |
+| `sap-automate-ingest` | HTML crawler, chunker, `EmbeddingClient` trait, ingestion pipeline |
+| `sap-automate-rfc` | **`SapClient` trait**, MockSapClient, pool, retry, circuit breaker, layered credentials |
+| `sap-automate-connectors` | Connector traits (placeholder for Phase 2 finalisation) |
 | `sap-automate-skills` | Skill descriptor + loader (Phase 8) |
 | `sap-automate-memory` | Four-tier memory model (Phase 8) |
-| `apps/sap-automate-server` | Main MCP server binary (stdio) |
+| `apps/sap-automate-server` | Main MCP server binary (stdio); 12 tools, 11 resources, 2 prompts |
+| `apps/sap-automate-ingest` | Ingestion CLI (Phase 1A) |
 | `apps/sample-server` | Minimal demo server (echo + add) |
 | `apps/sample-client` | CLI client that drives any MCP server |
 

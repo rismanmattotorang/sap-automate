@@ -22,13 +22,29 @@ struct Cli {
     #[arg(long, default_value = "target/debug/sap-automate-server")]
     server: String,
 
-    /// Optional tool to call after `tools/list`.  Format: name=key=val,key=val.
+    /// Extra arguments to pass through to the server binary (repeatable).
+    #[arg(long = "server-arg", num_args = 1)]
+    server_args: Vec<String>,
+
+    /// Optional tool to call after `tools/list`.
+    /// Two formats supported:
+    ///   - `name=key=val,key=val` (legacy; values are JSON-parsed)
+    ///   - `name='{"key": "val", ...}'` (full JSON object; preferred for
+    ///     nested / array-valued arguments)
     #[arg(long)]
     call: Option<String>,
 
     /// Optional second tool to call.
     #[arg(long)]
     then: Option<String>,
+
+    /// List tools / resources / prompts and exit (no tool calls).
+    #[arg(long)]
+    list: bool,
+
+    /// Read a resource by URI and print it.
+    #[arg(long)]
+    read_resource: Option<String>,
 }
 
 #[tokio::main]
@@ -41,6 +57,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     let mut child = Command::new(&cli.server)
+        .args(&cli.server_args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -82,6 +99,28 @@ async fn main() -> anyhow::Result<()> {
     }
     println!();
 
+    if cli.list {
+        let resources = client.list_resources().await?;
+        println!("== Resources ({})", resources.resources.len());
+        for r in &resources.resources { println!("  - {} ({})", r.uri, r.name); }
+        println!();
+        let prompts = client.list_prompts().await?;
+        println!("== Prompts ({})", prompts.prompts.len());
+        for p in &prompts.prompts {
+            println!("  - {} — {}", p.name, p.description.as_deref().unwrap_or(""));
+        }
+        println!();
+    }
+
+    if let Some(uri) = cli.read_resource.as_deref() {
+        println!("== Reading resource {uri}");
+        let r = client.read_resource(uri).await?;
+        for c in &r.contents {
+            if let Some(text) = &c.text { println!("{text}"); }
+        }
+        println!();
+    }
+
     for spec in [cli.call.as_deref(), cli.then.as_deref()].into_iter().flatten() {
         invoke(&client, spec).await?;
     }
@@ -109,20 +148,36 @@ async fn invoke(client: &std::sync::Arc<Client>, spec: &str) -> anyhow::Result<(
     Ok(())
 }
 
-/// Parse `name=k=v,k=v` into (name, json object).  Values are parsed as JSON
-/// (so numbers stay numeric); fallback to string.
+/// Parse a call spec.  Two forms accepted:
+///
+///   `name={"k": "v", ...}`  -- the JSON object after `=` is parsed as-is.
+///   `name=k=v,k=v`          -- legacy form; pairs are comma-separated and
+///                              the values are JSON-parsed individually.
+///
+/// The JSON form wins whenever the rest after the first `=` parses as a
+/// JSON object — this lets nested objects / arrays / strings-with-commas
+/// pass through without escaping.
 fn parse_call_spec(spec: &str) -> anyhow::Result<(String, serde_json::Value)> {
     let (name, rest) = spec.split_once('=').unwrap_or((spec, ""));
+    if rest.is_empty() {
+        return Ok((name.into(), serde_json::Value::Object(serde_json::Map::new())));
+    }
+    // Form 1: full JSON object.
+    let trimmed = rest.trim();
+    if trimmed.starts_with('{') {
+        let parsed: serde_json::Value = serde_json::from_str(trimmed)
+            .map_err(|e| anyhow::anyhow!("invalid JSON for tool '{name}': {e}"))?;
+        return Ok((name.into(), parsed));
+    }
+    // Form 2: legacy comma-separated key=value list.
     let mut obj = serde_json::Map::new();
-    if !rest.is_empty() {
-        for pair in rest.split(',') {
-            let (k, v) = pair
-                .split_once('=')
-                .ok_or_else(|| anyhow::anyhow!("invalid pair '{pair}'; expected key=value"))?;
-            let parsed: serde_json::Value =
-                serde_json::from_str(v).unwrap_or_else(|_| serde_json::Value::String(v.into()));
-            obj.insert(k.into(), parsed);
-        }
+    for pair in rest.split(',') {
+        let (k, v) = pair
+            .split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("invalid pair '{pair}'; expected key=value or use JSON form"))?;
+        let parsed: serde_json::Value =
+            serde_json::from_str(v).unwrap_or_else(|_| serde_json::Value::String(v.into()));
+        obj.insert(k.into(), parsed);
     }
     Ok((name.into(), serde_json::Value::Object(obj)))
 }

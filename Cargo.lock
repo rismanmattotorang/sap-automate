@@ -1426,17 +1426,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "sap-automate-rfc"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "sap-automate-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "clap",
  "mcp-core",
  "mcp-server",
  "mcp-transport",
  "sap-automate-ingest",
  "sap-automate-kb",
  "sap-automate-rag",
+ "sap-automate-rfc",
  "serde",
  "serde_json",
  "tokio",

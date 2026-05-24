@@ -1,27 +1,69 @@
 //! SAP-Automate MCP server binary.
 //!
-//! Phase 1A: the server now sits behind the `KnowledgeStore` trait and an
-//! `EmbeddingClient` so it can run against either:
-//!   - default: `InMemoryKb` + `MockEmbedder` seeded with the demo corpus
-//!     (works offline, used by the Phase 1 demo and CI),
-//!   - production: `QdrantStore` + `OpenAiEmbedder` populated by the
-//!     `sap-automate-ingest` binary.
+//! Phase 2: this binary is the upgraded SAP-Automate server, incorporating
+//! the design insights from the reference projects studied in
+//! `docs/COMPARISON.md`:
 //!
-//! The same MCP tool surface (abap.search, bpmn.find_process, eam.search_apps,
-//! sap.help.search) works against both.
+//! - **8 new SAP tools** (`sap.system.info`, `sap.rfc.search`,
+//!   `sap.rfc.metadata`, `sap.rfc.bulk_metadata`, `sap.rfc.call`,
+//!   `sap.table.read`, `sap.table.structure`, `sap.docs.search`)
+//!   alongside the four existing RAG tools.
+//! - **Resources**: `sap-system://info`, `sap-table://{name}/structure`,
+//!   `sap-rfc://{name}`, plus an AGENTS-md guardrails resource.
+//! - **Prompts**: `sap.review-rfc-call`, `sap.transport-impact-analysis`.
+//! - **Read-only mode by default** (CData pattern); explicit
+//!   `--enable-writes` flips the safety gate.
+//! - **AGENTS.md loader** (MDK pattern): per-project guardrails surfaced
+//!   in `initialize.instructions`.
+//! - **Structured SAP error taxonomy** mapped to MCP JSON-RPC error codes.
 
-use mcp_core::{CallToolResult, ToolContent, ToolInputSchema};
-use mcp_server::{Server, ToolDescriptor};
-use mcp_server::registry::ToolFn;
+mod context;
+mod seed;
+mod tools;
+mod resources;
+mod prompts;
+
+use clap::Parser;
+use mcp_server::Server;
 use mcp_transport::StdioTransport;
 use sap_automate_ingest::{EmbeddingClient, MockEmbedder};
-use sap_automate_kb::{Domain, InMemoryKb, KnowledgeStore};
-use sap_automate_rag::{Query, RagEngine};
-use serde::Deserialize;
+use sap_automate_kb::{InMemoryKb, KnowledgeStore};
+use sap_automate_rag::RagEngine;
+use sap_automate_rfc::{
+    Credentials, CredentialProvider, CredentialSource, EnvCredentialProvider,
+    LayeredCredentialProvider, MockSapClient, SapClient, StaticCredentialProvider,
+};
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
-mod seed;
+use context::ServerContext;
+
+#[derive(Parser, Clone)]
+#[command(
+    name = "sap-automate-server",
+    about = "SAP-Automate MCP server with RAG + RFC tools, resources, and prompts.",
+    version,
+)]
+struct Cli {
+    /// Disable read-only safety; allow MCP tools to call write-side RFCs.
+    /// Equivalent to setting `SAP_AUTOMATE_ENABLE_WRITES=1`.
+    #[arg(long)]
+    enable_writes: bool,
+
+    /// Maximum concurrent SAP calls (paper §IV-G).
+    #[arg(long, default_value_t = 8)]
+    pool_size: usize,
+
+    /// Path to an AGENTS.md guardrails file (MDK pattern).  Surfaced in
+    /// `initialize.instructions` so MCP clients can apply project-local
+    /// policy.  Defaults to `./AGENTS.md` if present.
+    #[arg(long)]
+    agents_md: Option<String>,
+
+    /// Embedding vector dimension for the in-memory KB.
+    #[arg(long, default_value_t = 256)]
+    embedding_dim: usize,
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -30,115 +72,111 @@ async fn main() -> anyhow::Result<()> {
         .with_writer(std::io::stderr)
         .init();
 
-    let store: Arc<dyn KnowledgeStore> = Arc::new(InMemoryKb::new());
-    let embedder: Arc<dyn EmbeddingClient> = Arc::new(MockEmbedder::new(256));
-    seed::populate_with_embeddings(&store, embedder.as_ref()).await?;
+    let cli = Cli::parse();
+    let read_only = !cli.enable_writes && std::env::var("SAP_AUTOMATE_ENABLE_WRITES").ok().as_deref() != Some("1");
 
+    // Build the KB + embedder.
+    let store: Arc<dyn KnowledgeStore> = Arc::new(InMemoryKb::new());
+    let embedder: Arc<dyn EmbeddingClient> = Arc::new(MockEmbedder::new(cli.embedding_dim));
+    seed::populate_with_embeddings(&store, embedder.as_ref()).await?;
     let rag = Arc::new(RagEngine::new(store.clone()));
 
-    let server = build_server(rag, embedder);
+    // Build the SAP client.  Credentials are layered (env first, static
+    // fallback for the offline demo).
+    let creds_provider = LayeredCredentialProvider::new()
+        .add(Arc::new(EnvCredentialProvider::new()))
+        .add(Arc::new(StaticCredentialProvider::new(Credentials {
+            ashost: "mock.sap.example".into(),
+            sysnr: "00".into(),
+            client: "100".into(),
+            user: "DEMO".into(),
+            password: "redacted".into(),
+            language: "EN".into(),
+            saprouter: None,
+            source: CredentialSource::Static,
+        })));
+    let creds = creds_provider.fetch().await
+        .map_err(|e| anyhow::anyhow!("credential resolution failed: {e}"))?
+        .ok_or_else(|| anyhow::anyhow!("no credentials available"))?;
+    tracing::info!(identity = %creds.redacted(), "SAP identity resolved");
+
+    let sap_client: Arc<dyn SapClient> = MockSapClient::new(cli.pool_size, creds.redacted());
+
+    // AGENTS.md guardrails.
+    let agents_md = load_agents_md(cli.agents_md.as_deref()).await;
+
+    let ctx = Arc::new(ServerContext {
+        rag,
+        embedder,
+        sap_client,
+        read_only,
+        agents_md: agents_md.clone(),
+    });
+
+    let server = build_server(ctx.clone(), &agents_md, read_only);
+    tracing::info!(
+        read_only = read_only,
+        pool_size = cli.pool_size,
+        embedding_dim = cli.embedding_dim,
+        tools = 12,
+        "SAP-Automate server configured"
+    );
     server.run(StdioTransport::from_stdio()).await?;
     Ok(())
 }
 
-fn build_server(rag: Arc<RagEngine>, embedder: Arc<dyn EmbeddingClient>) -> Server {
-    Server::builder("sap-automate-server", env!("CARGO_PKG_VERSION"))
-        .instructions(
-            "SAP-Automate MCP server. Tools: abap.search, bpmn.find_process, \
-             eam.search_apps, sap.help.search. Backed by the configured \
-             KnowledgeStore (default: in-memory; configurable to Qdrant).",
-        )
-        .tool(make_search_tool("abap.search", "Hybrid search over the ABAP corpus.", Domain::Abap, Arc::clone(&rag), Arc::clone(&embedder)))
-        .tool(make_search_tool("bpmn.find_process", "Search the Signavio BPMN process repository.", Domain::Bpmn, Arc::clone(&rag), Arc::clone(&embedder)))
-        .tool(make_search_tool("eam.search_apps", "Search the LeanIX EAM application fact sheets.", Domain::Leanix, Arc::clone(&rag), Arc::clone(&embedder)))
-        .tool(make_search_tool("sap.help.search", "Search the SAP Help Portal corpus.", Domain::SapHelp, Arc::clone(&rag), Arc::clone(&embedder)))
-        .build()
+fn build_server(ctx: Arc<ServerContext>, agents_md: &Option<String>, read_only: bool) -> Server {
+    let mut builder = Server::builder("sap-automate-server", env!("CARGO_PKG_VERSION"))
+        .instructions(build_instructions(agents_md, read_only));
+
+    // Existing RAG tools (Phase 1 + 1A).
+    for desc in tools::rag_tools(&ctx) { builder = builder.tool(desc); }
+
+    // New SAP tools (Phase 2).
+    for desc in tools::sap_tools(&ctx) { builder = builder.tool(desc); }
+
+    // Resources.
+    for desc in resources::all(&ctx) { builder = builder.resource(desc); }
+
+    // Prompts.
+    for desc in prompts::all() { builder = builder.prompt(desc); }
+
+    builder.build()
 }
 
-#[derive(Debug, Deserialize)]
-struct SearchArgs {
-    query: String,
-    #[serde(default = "default_top_k")]
-    top_k: usize,
-}
-
-fn default_top_k() -> usize { 5 }
-
-fn search_schema() -> ToolInputSchema {
-    ToolInputSchema::from_value(serde_json::json!({
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "description": "Free-text query"},
-            "top_k": {"type": "integer", "minimum": 1, "maximum": 50, "default": 5}
-        },
-        "required": ["query"]
-    }))
-}
-
-fn make_search_tool(
-    name: &str,
-    description: &str,
-    domain: Domain,
-    rag: Arc<RagEngine>,
-    embedder: Arc<dyn EmbeddingClient>,
-) -> ToolDescriptor {
-    let tool_name = name.to_string();
-    let handler = ToolFn(move |arguments: serde_json::Value| {
-        let rag = Arc::clone(&rag);
-        let embedder = Arc::clone(&embedder);
-        let tool_name = tool_name.clone();
-        async move {
-            let args: SearchArgs = match serde_json::from_value(arguments) {
-                Ok(a) => a,
-                Err(e) => return Ok(CallToolResult::error(format!("{tool_name}: invalid arguments: {e}"))),
-            };
-
-            // Embed the query so vector backends (Qdrant) get the right signal.
-            let q_vec = match embedder.embed(&[args.query.clone()]).await {
-                Ok(mut v) => v.pop(),
-                Err(e) => {
-                    tracing::warn!(error = %e, "embedder unavailable; falling back to lexical");
-                    None
-                }
-            };
-
-            let hits = match rag.search(Query {
-                text: &args.query,
-                domain: Some(domain),
-                top_k: args.top_k,
-                embedding: q_vec,
-            }).await {
-                Ok(h) => h,
-                Err(e) => return Ok(CallToolResult::error(format!("{tool_name}: store error: {e}"))),
-            };
-
-            if hits.is_empty() {
-                return Ok(CallToolResult::text(format!("{tool_name}: no matches for \"{}\"", args.query)));
-            }
-
-            let mut lines = vec![format!("{tool_name}: {} hit(s) for \"{}\"", hits.len(), args.query)];
-            for h in &hits {
-                lines.push(format!(
-                    "- [{:?}] {} ({:.3}) — {}\n  uri: {}",
-                    h.layer,
-                    h.hit.chunk.title,
-                    h.hit.score,
-                    truncate(&h.hit.chunk.text, 160),
-                    h.hit.chunk.uri,
-                ));
-            }
-            Ok(CallToolResult { content: vec![ToolContent::text(lines.join("\n"))], is_error: false })
-        }
-    });
-
-    ToolDescriptor::new(name, Some(description.into()), search_schema(), Arc::new(handler))
-}
-
-fn truncate(s: &str, n: usize) -> String {
-    if s.chars().count() <= n { s.to_string() }
-    else {
-        let mut out: String = s.chars().take(n).collect();
-        out.push('…');
-        out
+fn build_instructions(agents_md: &Option<String>, read_only: bool) -> String {
+    let mut s = String::new();
+    s.push_str(
+        "SAP-Automate MCP server (Phase 2).\n\
+         Tools: abap.search, bpmn.find_process, eam.search_apps, sap.help.search, \
+         sap.system.info, sap.rfc.search, sap.rfc.metadata, sap.rfc.bulk_metadata, \
+         sap.rfc.call, sap.table.read, sap.table.structure, sap.docs.search.\n\
+         Resources: sap-system://info, sap-table://{name}/structure, sap-rfc://{name}, \
+         agents://guardrails.\n\
+         Prompts: sap.review-rfc-call, sap.transport-impact-analysis.\n",
+    );
+    if read_only {
+        s.push_str("Mode: READ-ONLY. Write-side RFCs (e.g. BAPI_SALESORDER_CREATEFROMDAT2, BAPI_ACC_DOCUMENT_POST) are blocked. Pass --enable-writes to allow.\n");
+    } else {
+        s.push_str("Mode: WRITE-ENABLED. Treat every sap.rfc.call invocation as authorised.\n");
     }
+    if let Some(md) = agents_md {
+        s.push_str("\n--- AGENTS.md guardrails ---\n");
+        s.push_str(md);
+    }
+    s
+}
+
+async fn load_agents_md(explicit_path: Option<&str>) -> Option<String> {
+    let candidates: Vec<String> = match explicit_path {
+        Some(p) => vec![p.to_string()],
+        None => vec!["AGENTS.md".to_string(), ".sap-automate/AGENTS.md".to_string()],
+    };
+    for path in candidates {
+        if let Ok(content) = tokio::fs::read_to_string(&path).await {
+            tracing::info!(path, bytes = content.len(), "loaded AGENTS.md guardrails");
+            return Some(content);
+        }
+    }
+    None
 }

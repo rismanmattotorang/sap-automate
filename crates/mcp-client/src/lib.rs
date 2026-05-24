@@ -154,8 +154,18 @@ impl Client {
         self.call(methods::RESOURCES_LIST, None).await
     }
 
+    pub async fn read_resource(&self, uri: &str) -> Result<mcp_core::ReadResourceResult> {
+        let params = mcp_core::ReadResourceParams { uri: uri.into() };
+        self.call(methods::RESOURCES_READ, Some(serde_json::to_value(params)?)).await
+    }
+
     pub async fn list_prompts(&self) -> Result<ListPromptsResult> {
         self.call(methods::PROMPTS_LIST, None).await
+    }
+
+    pub async fn get_prompt(&self, name: &str, arguments: Option<Value>) -> Result<mcp_core::protocol::GetPromptResult> {
+        let params = mcp_core::protocol::GetPromptParams { name: name.into(), arguments };
+        self.call(methods::PROMPTS_GET, Some(serde_json::to_value(params)?)).await
     }
 
     pub async fn ping(&self) -> Result<()> {
