@@ -76,11 +76,17 @@ cargo run --release --bin sap-automate-tui
 # Demo 10 (Phase 4): instantiate a skill (auto-loaded from ./skills/*.md)
 cargo run --release -p sample-client -- --server target/release/sap-automate-server \
     --get-prompt 'sap.skill.period_close_investigation={"company_code":"1000","fiscal_period":"2026-M03"}'
+
+# Demo 11 (Phase 5): Next.js 14 web UI — Operations / Query Lab / Tools / Skills / Resources
+./target/release/sap-automate-server --transport http --bind 127.0.0.1:3030 &
+cd apps/web && npm install && npx next dev
+# Open http://localhost:3000 — see docs/web-screens/ for screenshots
 ```
 
 See [`docs/COMPARISON.md`](docs/COMPARISON.md) for the comparative analysis
 against `thupalo/sap-rfc-mcp-server`, `CDataSoftware/sap-erp-mcp-server`,
-and `SAP/mdk-mcp-server`.
+`SAP/mdk-mcp-server`, `mario-andreschak/mcp-abap-adt`,
+`fr0ster/mcp-abap-adt`, and `marianfoo/sap-ai-mcp-servers`.
 
 Expected output:
 
