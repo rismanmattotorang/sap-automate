@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+  <title>Period-End Close in SAP FI - SAP Help Portal</title>
+  <meta name="module" content="FI"/>
+</head>
+<body>
+  <nav class="breadcrumb">
+    <a>Finance</a> &gt; <a>General Ledger</a> &gt; <a>Period Close</a>
+  </nav>
+  <h1>Period-End Close in SAP FI</h1>
+  <main>
+    <p>
+      The period-end close process in SAP FI consists of opening and closing
+      posting periods, executing foreign currency revaluation, posting
+      accruals and deferrals, reconciling document line items between BSEG
+      and FAGLFLEXA, and generating the balance audit trail.
+    </p>
+    <p>
+      Use transaction code <code>T001B</code> to maintain the table that
+      controls which posting periods are open for each company code and
+      account type.
+    </p>
+    <p>
+      Foreign currency revaluation is executed via transaction
+      <code>FAGL_FC_VAL</code>; the run revalues open items in foreign
+      currencies at the closing exchange rate and posts the unrealised
+      gains and losses to the configured G/L accounts.
+    </p>
+    <p>
+      Run reconciliation report <code>FAGLF03</code> to confirm that the
+      general ledger and document line items are consistent before
+      closing the period.
+    </p>
+  </main>
+</body>
+</html>

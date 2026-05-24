@@ -1,24 +1,23 @@
 [package]
-name = "sap-automate-kb"
+name = "sap-automate-ingest"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "SAP-Automate knowledge base: Qdrant/Postgres/ArangoDB clients and document schema."
+description = "SAP-Automate knowledge ingestion: crawler + chunker + embedder + pipeline (Phase 1A)."
 
 [dependencies]
+sap-automate-kb = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }
-reqwest = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+url = { workspace = true }
+scraper = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
-
-[features]
-default = []
-qdrant = ["reqwest", "tokio"]
 
 [dev-dependencies]
 tokio = { workspace = true }

@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+  <title>Payroll Run Execution - SAP Help Portal</title>
+  <meta name="module" content="HCM"/>
+</head>
+<body>
+  <nav class="breadcrumb">
+    <a>Human Capital Management</a> &gt; <a>Payroll</a> &gt; <a>Execution</a>
+  </nav>
+  <h1>Payroll Run Execution</h1>
+  <main>
+    <p>
+      Execute the payroll run using transaction <code>PC00_M99_CALC</code>
+      or country-specific variants. The driver program reads infotypes
+      from tables PA0008 (basic pay), PA0014 (recurring payments), and
+      PA0015 (additional payments).
+    </p>
+    <p>
+      Payroll results are stored in cluster B2 (table PCL2). Use
+      transaction <code>PC_PAYRESULT</code> to inspect a single
+      employee's wage type results for a payroll period.
+    </p>
+    <p>
+      Post payroll results to FI/CO via transaction
+      <code>PC00_M99_CIPE</code>; the posting groups wage types into
+      symbolic accounts, which are mapped to G/L accounts in customising.
+    </p>
+  </main>
+</body>
+</html>

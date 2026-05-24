@@ -16,14 +16,27 @@ agentic layer) extend this foundation — see [`docs/ROADMAP.md`](docs/ROADMAP.m
 # Build everything
 cargo build --release
 
-# Run the test suite (in-process MCP client ↔ server round-trip)
+# Run the test suite (16 tests across protocol, KB, ingestion, MCP integration)
 cargo test --workspace
 
-# Demo: spawn the SAP-Automate server and call a tool
+# Demo 1: spawn the SAP-Automate MCP server and call a tool
 cargo run --release -p sample-client -- \
     --server target/release/sap-automate-server \
-    --call abap.search=query="material master",top_k=3 \
-    --then sap.help.search=query="period close"
+    --call 'abap.search=query="BAPI_ACC_DOCUMENT_POST",top_k=2' \
+    --then 'sap.help.search=query="period close FAGLFLEXA"'
+
+# Demo 2 (Phase 1A): crawl a Help Portal HTML corpus, embed, then search by intent
+cargo run --release --bin sap-automate-ingest -- \
+    --input-dir ./docs/sample-help-corpus \
+    --backend memory --embedder mock --embedding-dim 256 \
+    --verify-query "period close foreign currency revaluation"
+
+# Demo 3 (production wiring): run against Qdrant + OpenAI
+cargo run --release --bin sap-automate-ingest -- \
+    --input-dir ./docs/sample-help-corpus \
+    --backend qdrant --qdrant-url http://localhost:6333 \
+    --embedder openai --openai-model text-embedding-3-large --embedding-dim 3072 \
+    --verify-query "period close foreign currency revaluation"
 ```
 
 Expected output:

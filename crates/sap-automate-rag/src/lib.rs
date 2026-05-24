@@ -1,12 +1,12 @@
 //! SAP-Automate RAG engine.
 //!
 //! Paper §VII defines a five-layer pipeline: L0 query analysis, L1 routing,
-//! L2 hybrid retrieval, L3 GraphRAG, L4 HippoRAG, L5 RAPTOR.  This Phase 1
-//! skeleton implements only L2 against `InMemoryKb`; the algorithm
-//! signatures are stable so later phases plug in concrete implementations
-//! without changing call sites.
+//! L2 hybrid retrieval, L3 GraphRAG, L4 HippoRAG, L5 RAPTOR.  Phase 1A
+//! implements L2 (hybrid) against any `KnowledgeStore` backend, taking an
+//! optional pre-computed query embedding so vector search works against
+//! Qdrant when available and falls back to lexical search for InMemoryKb.
 
-use sap_automate_kb::{Document, Domain, InMemoryKb};
+use sap_automate_kb::{Domain, KnowledgeStore, SearchHit, SearchQuery};
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -14,14 +14,13 @@ pub struct Query<'a> {
     pub text: &'a str,
     pub domain: Option<Domain>,
     pub top_k: usize,
+    pub embedding: Option<Vec<f32>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Hit {
-    pub document: Document,
-    /// Layer that produced the hit (paper Algorithm 1).
+    pub hit: SearchHit,
     pub layer: Layer,
-    pub score: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,23 +32,21 @@ pub enum Layer {
 }
 
 pub struct RagEngine {
-    kb: Arc<InMemoryKb>,
+    store: Arc<dyn KnowledgeStore>,
 }
 
 impl RagEngine {
-    pub fn new(kb: Arc<InMemoryKb>) -> Self { Self { kb } }
+    pub fn new(store: Arc<dyn KnowledgeStore>) -> Self {
+        Self { store }
+    }
 
-    /// Phase 1 path: Layer 2 (hybrid) → simple term-frequency search until the
-    /// BM25 + dense + RRF implementation lands in Phase 3.
-    pub async fn search<'a>(&self, query: Query<'a>) -> Vec<Hit> {
-        let docs = self.kb.search(query.text, query.domain, query.top_k);
-        docs.into_iter()
-            .enumerate()
-            .map(|(rank, document)| Hit {
-                document,
-                layer: Layer::Hybrid,
-                score: 1.0 / (1.0 + rank as f32),
-            })
-            .collect()
+    /// Phase 1A path: Layer 2 hybrid retrieval against the configured KB.
+    /// Layer 3/4/5 routing arrives in Phase 5A (paper §X-H).
+    pub async fn search<'a>(&self, query: Query<'a>) -> Result<Vec<Hit>, sap_automate_kb::StoreError> {
+        let mut q = SearchQuery::text(query.text, query.top_k);
+        if let Some(d) = query.domain { q = q.with_domain(d); }
+        if let Some(e) = query.embedding { q = q.with_embedding(e); }
+        let hits = self.store.search(q).await?;
+        Ok(hits.into_iter().map(|h| Hit { hit: h, layer: Layer::Hybrid }).collect())
     }
 }

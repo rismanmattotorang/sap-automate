@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+  <title>Goods Movement Posting - SAP Help Portal</title>
+  <meta name="module" content="MM"/>
+</head>
+<body>
+  <nav class="breadcrumb">
+    <a>Logistics</a> &gt; <a>Materials Management</a> &gt; <a>Inventory</a>
+  </nav>
+  <h1>Goods Movement Posting</h1>
+  <main>
+    <p>
+      Post goods movements using transaction <code>MIGO</code>. The system
+      supports movement types 101 (goods receipt for a purchase order),
+      102 (reversal of GR), 122 (return delivery), 261 (goods issue to a
+      cost centre), and 311 (transfer posting).
+    </p>
+    <p>
+      Each posting updates table <code>MSEG</code> (material document line
+      items), <code>MKPF</code> (material document headers), and the
+      material valuation tables according to the price-control indicator
+      (V for moving-average, S for standard price).
+    </p>
+    <p>
+      Batch-managed materials require a batch number; serial-managed
+      materials require a serial number. The system enforces stock type
+      consistency (unrestricted, quality inspection, blocked).
+    </p>
+  </main>
+</body>
+</html>

@@ -27,21 +27,24 @@ sap-automate/
 │   ├── sap-automate-rag/         # RAG: L2 hybrid (P3), L3 GraphRAG / L4 HippoRAG / L5 RAPTOR (P5A)
 │   ├── sap-automate-connectors/  # ADT (ABAP) + Signavio + LeanIX (P2)
 │   ├── sap-automate-skills/      # agentskills.io-compatible loader (P8A)
-│   └── sap-automate-memory/      # working/episodic/semantic/procedural (P8)
+│   ├── sap-automate-memory/      # working/episodic/semantic/procedural (P8)
+│   └── sap-automate-ingest/      # crawler + chunker + embedder + pipeline (P1A)
 ├── apps/
 │   ├── sap-automate-server/      # main MCP server binary
+│   ├── sap-automate-ingest/      # ingestion CLI (P1A)
 │   ├── sample-server/            # minimal demo server (echo + add)
 │   └── sample-client/            # CLI client that spawns and drives a server
 └── docs/
-    └── ROADMAP.md                # this file
+    ├── ROADMAP.md                # this file
+    └── sample-help-corpus/       # 4-page HTML corpus for end-to-end demo
 ```
 
 ## Phase plan
 
 | Phase | Weeks | Deliverable | Gate | Status |
 |---|---|---|---|---|
-| **P1**  | 1–4  | Rust MCP server: JSON-RPC, transports, capability router, basic auth | MCP conformance against stub backend | **Phase 1 foundation: ✅ done** |
-| P1A | 1–3 (∥)  | Postgres + Qdrant schema; SAP Help crawler; 10k-page pilot | end-to-end vector search returns Help pages | next |
+| **P1**  | 1–4  | Rust MCP server: JSON-RPC, transports, capability router, basic auth | MCP conformance against stub backend | **✅ done** |
+| **P1A** | 1–3 (∥)  | Postgres + Qdrant schema; SAP Help crawler; 10k-page pilot | end-to-end vector search returns Help pages | **✅ done (pilot scale)** |
 | P2  | 5–8  | ADT + Signavio + LeanIX clients wired as MCP tools | typed tools live | |
 | P3  | 9–12 | Hybrid RAG (dense + sparse) + RRF fusion + cross-encoder reranker | P95 hybrid retrieval < 80 ms | |
 | P3A | 12–15 (∥) | Contextual retrieval enrichment + SPLADE + parent-child expansion | P95 < 100 ms with reranking | |
@@ -80,16 +83,56 @@ The foundation is in place; downstream phases extend rather than rewrite it.
   passes initialise → list_tools → call_tool, and validates the UnknownTool
   protocol error.
 
-## Phase 1A — next up
+## Phase 1A acceptance — what we shipped
 
-1. `sap-automate-kb`: add Qdrant client (HTTP) and Postgres pool (`sqlx`).
-2. Build the document schema migration; index seed corpus into Postgres.
-3. Implement the SAP Help Portal crawler (HTML extraction, ETag handling,
-   breadcrumb capture) — paper §VI-C.
-4. Wire `text-embedding-3-large` calls behind a `EmbeddingClient` trait;
-   stub with a hash-based mock for offline tests.
-5. Replace `InMemoryKb::search` with a `QdrantKb` backend behind the same
-   trait; switch `RagEngine` over once parity is reached.
+The acceptance gate (paper §X-B: *"end-to-end vector search returning Help
+pages by intent"*) is satisfied at pilot scale.
 
-The Phase 1 trait surfaces (`Transport`, `ToolHandler`, KB schema) are stable;
-Phase 1A and beyond can land without touching server or client code.
+- **`KnowledgeStore` trait** with two implementations: `InMemoryKb` (default,
+  offline) and `QdrantStore` (REST, behind the `qdrant` feature) — same async
+  contract, hot-swappable.
+- **Document + Chunk schema** (paper §VI-D): stable URIs, breadcrumbs,
+  SHA-256 content hash, ETag, per-domain Qdrant collection mapping.
+- **HTML parser** (`parse_help_portal_html`) with snapshot test suite
+  guarding against Help Portal selector drift (paper §X-N risk-1).
+- **`HelpPortalCrawler`** with directory mode (CI / offline) and HTTP mode
+  (`If-None-Match` / 304 short-circuit, ETag capture).
+- **Chunker** with breadcrumb-prepended contextual prefix and configurable
+  target/overlap; preserves sentence boundaries.
+- **`EmbeddingClient` trait** with a deterministic `MockEmbedder` (no
+  network, used by tests/CI) and an `OpenAiEmbedder` for
+  `text-embedding-3-large` (or any OpenAI-compatible endpoint).
+- **`IngestionPipeline`** orchestrator: crawl → chunk → batch-embed → upsert.
+- **`sap-automate-ingest` CLI** runs the full flow end-to-end with a
+  `--verify-query` smoke test that prints top-K hits.
+- **MCP server** updated to embed the user's query and route through the
+  same `KnowledgeStore` trait; ABAP / BPMN / EAM / SAP Help tools all work
+  in either backend mode.
+- **Demo corpus**: 4 HTML pages under `docs/sample-help-corpus/` (FI period
+  close, MM goods movement, SD billing, HCM payroll); each test query
+  returns the right top-1 hit:
+
+  | Query | Top-1 hit | Score |
+  |---|---|---|
+  | "period close foreign currency revaluation" | FI period-close | 0.329 |
+  | "movement type 101 goods receipt" | MM goods movement | 0.329 |
+  | "billing document VF01 invoice" | SD billing | 0.372 |
+  | "payroll wage type" | HCM payroll | 0.486 |
+
+- **Tests**: 16 passing — JSON-RPC round-trip, transport, KB
+  (text + vector + hashing), chunker (breadcrumb + multi-chunk), embedder
+  (cosine, dim, normalisation), pipeline (ingest → vector search),
+  crawler (parse + reject), MCP integration (handshake + tool call + error).
+
+## Next up: Phase 2 — SAP Connectors
+
+1. Wire real ADT REST client into `sap-automate-connectors` (paper §IV
+   data-and-I/O band).
+2. Signavio GraphQL client.
+3. LeanIX GraphQL client.
+4. Add the corresponding MCP tools: `abap.read_object`, `abap.callers`,
+   `bpmn.read_xml`, `eam.impact_map`, `eam.lifecycle`.
+5. Transport-resilient retry + circuit-breaker policies.
+
+Phase 1A trait surfaces (`KnowledgeStore`, `EmbeddingClient`,
+`IngestionPipeline`) are stable; Phase 2 lands without touching them.

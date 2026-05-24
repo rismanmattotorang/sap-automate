@@ -10,7 +10,9 @@ members = [
     "crates/sap-automate-connectors",
     "crates/sap-automate-skills",
     "crates/sap-automate-memory",
+    "crates/sap-automate-ingest",
     "apps/sap-automate-server",
+    "apps/sap-automate-ingest",
     "apps/sample-server",
     "apps/sample-client",
 ]
@@ -52,6 +54,15 @@ sap-automate-rag = { path = "crates/sap-automate-rag" }
 sap-automate-connectors = { path = "crates/sap-automate-connectors" }
 sap-automate-skills = { path = "crates/sap-automate-skills" }
 sap-automate-memory = { path = "crates/sap-automate-memory" }
+sap-automate-ingest = { path = "crates/sap-automate-ingest" }
+
+# HTTP / web (Phase 1A)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+url = "2"
+scraper = "0.20"
+sha2 = "0.10"
+hex = "0.4"
+clap = { version = "4", features = ["derive"] }
 
 [profile.release]
 lto = "thin"

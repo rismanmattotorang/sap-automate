@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+  <title>Billing Document Creation - SAP Help Portal</title>
+  <meta name="module" content="SD"/>
+</head>
+<body>
+  <nav class="breadcrumb">
+    <a>Logistics</a> &gt; <a>Sales and Distribution</a> &gt; <a>Billing</a>
+  </nav>
+  <h1>Billing Document Creation</h1>
+  <main>
+    <p>
+      Create billing documents from sales orders or deliveries using
+      transaction <code>VF01</code>. Billing types include F2 (invoice),
+      G2 (credit memo), L2 (debit memo), and S1 (cancellation).
+    </p>
+    <p>
+      The system determines pricing through the pricing procedure assigned
+      to the sales document type; condition records from tables KONP and
+      KONV are evaluated at billing time.
+    </p>
+    <p>
+      Output determination is configured via transaction <code>NACE</code>;
+      successful billing triggers SD-to-FI integration, posting accounts
+      receivable, revenue, and tax to the appropriate G/L accounts.
+    </p>
+  </main>
+</body>
+</html>
