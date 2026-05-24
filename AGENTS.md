@@ -43,6 +43,21 @@ The server surfaces this as a structured `[DataPreviewBlocked]` error.
 Fall back to `sap.table.read` (RFC path) — it has its own buffer-overflow
 safety (max 1000 rows).
 
+## Workflow tools use elicitation — never fabricate confirmations
+
+Three high-stakes workflows pause mid-execution and ask the user to
+confirm cost centres, customer numbers, or transport IDs via a
+structured form rendered by the client:
+
+- `sap.workflow.create_purchase_order`
+- `sap.workflow.maintain_customer_master` (chained two-step elicitation)
+- `sap.workflow.release_transport` (re-typed confirmation phrase)
+
+The agent's role is to *kick off the workflow* with the best hints it
+has — never to hard-code cost centres, customer keys, or transport IDs.
+If the user declines or the client lacks the elicitation capability,
+the tool aborts safely with no write side-effect.
+
 ## Choose the right retrieval layer
 
 The server exposes four retrieval surfaces; pick deliberately:

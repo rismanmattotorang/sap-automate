@@ -4,11 +4,13 @@
 //! handshake, lists the tool catalogue, and invokes a small set of tools.
 //! Acts as a Phase 1 acceptance harness for the framework.
 
+use async_trait::async_trait;
 use clap::Parser;
-use mcp_client::Client;
-use mcp_core::{ClientCapabilities, Implementation};
+use mcp_client::{Client, ElicitationDelegate};
+use mcp_core::{ClientCapabilities, ElicitationAction, ElicitationParams, ElicitationResult, Implementation};
 use mcp_transport::stdio::StdioTransport;
 use std::process::Stdio;
+use std::sync::Arc;
 use tokio::process::{ChildStdin, ChildStdout, Command};
 use tracing_subscriber::EnvFilter;
 
@@ -50,6 +52,14 @@ struct Cli {
     /// Format: `name` or `name={"k": "v"}`.
     #[arg(long)]
     get_prompt: Option<String>,
+
+    /// Elicitation delegate behaviour:
+    ///   - `decline` (default) — refuse every elicitation
+    ///   - `accept` — auto-accept with the server's `default` values where present
+    ///   - `seed:{"key":"value", ...}` — auto-accept with the given object
+    ///   - `stdin` — interactively prompt for each field from stdin
+    #[arg(long, default_value = "decline")]
+    elicit: String,
 }
 
 #[tokio::main]
@@ -73,7 +83,16 @@ async fn main() -> anyhow::Result<()> {
     let stdout: ChildStdout = child.stdout.take().expect("piped stdout");
 
     let transport = StdioTransport::new(stdout, stdin);
-    let client = Client::spawn(transport);
+    let delegate = build_delegate(&cli.elicit)?;
+    let advertise_elicit = !matches!(cli.elicit.as_str(), "decline");
+    // Split-half spawn so server-initiated requests (elicitation) don't
+    // deadlock against client-initiated calls under load.
+    let client = Client::spawn_stdio(transport, delegate);
+
+    let mut capabilities = ClientCapabilities::default();
+    if advertise_elicit {
+        capabilities = capabilities.with_elicitation();
+    }
 
     let init = client
         .initialize(
@@ -81,7 +100,7 @@ async fn main() -> anyhow::Result<()> {
                 name: "sample-client".into(),
                 version: env!("CARGO_PKG_VERSION").into(),
             },
-            ClientCapabilities::default(),
+            capabilities,
         )
         .await?;
 
@@ -165,6 +184,133 @@ async fn invoke(client: &std::sync::Arc<Client>, spec: &str) -> anyhow::Result<(
     }
     println!();
     Ok(())
+}
+
+// ----------------------------------------------------------------------------
+// Elicitation delegates
+// ----------------------------------------------------------------------------
+
+fn build_delegate(spec: &str) -> anyhow::Result<Arc<dyn ElicitationDelegate>> {
+    if spec == "decline" {
+        return Ok(Arc::new(mcp_client::DeclineAll));
+    }
+    if spec == "accept" {
+        return Ok(Arc::new(AcceptDefaults));
+    }
+    if spec == "stdin" {
+        return Ok(Arc::new(StdinDelegate));
+    }
+    if let Some(json) = spec.strip_prefix("seed:") {
+        let parsed: serde_json::Value = serde_json::from_str(json)
+            .map_err(|e| anyhow::anyhow!("--elicit seed must be JSON: {e}"))?;
+        return Ok(Arc::new(SeededDelegate { content: parsed }));
+    }
+    anyhow::bail!("--elicit expected one of: decline | accept | stdin | seed:<json>");
+}
+
+/// Accept every elicitation with the schema's declared `default` values
+/// (when present) and empty strings / zeros otherwise.  Good for
+/// non-interactive smoke tests.
+struct AcceptDefaults;
+
+#[async_trait]
+impl ElicitationDelegate for AcceptDefaults {
+    async fn on_elicit(&self, params: ElicitationParams) -> ElicitationResult {
+        let content = synthesise_defaults(&params.requested_schema);
+        eprintln!("[elicit:accept] {}", params.message);
+        eprintln!("[elicit:accept] -> {}", content);
+        ElicitationResult { action: ElicitationAction::Accept, content: Some(content) }
+    }
+}
+
+/// Accept every elicitation with the same hard-coded payload (which may
+/// be missing fields the server requires).  Useful for end-to-end demos.
+struct SeededDelegate { content: serde_json::Value }
+
+#[async_trait]
+impl ElicitationDelegate for SeededDelegate {
+    async fn on_elicit(&self, params: ElicitationParams) -> ElicitationResult {
+        eprintln!("[elicit:seed] {}", params.message);
+        eprintln!("[elicit:seed] -> {}", self.content);
+        ElicitationResult { action: ElicitationAction::Accept, content: Some(self.content.clone()) }
+    }
+}
+
+/// Interactive: print the form to stderr, read each field from stdin.
+struct StdinDelegate;
+
+#[async_trait]
+impl ElicitationDelegate for StdinDelegate {
+    async fn on_elicit(&self, params: ElicitationParams) -> ElicitationResult {
+        use std::io::Write;
+        eprintln!("\n=== elicitation ===");
+        eprintln!("{}", params.message);
+        let props = params.requested_schema.get("properties").and_then(|v| v.as_object());
+        let required: std::collections::HashSet<String> = params.requested_schema
+            .get("required").and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        let mut out = serde_json::Map::new();
+        if let Some(props) = props {
+            for (name, spec) in props {
+                let typ = spec.get("type").and_then(|v| v.as_str()).unwrap_or("string");
+                let desc = spec.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                let default = spec.get("default");
+                let enum_vals = spec.get("enum").and_then(|v| v.as_array());
+                let req = required.contains(name);
+                eprint!("  {} ({typ}{}{}{}) {desc}",
+                    name,
+                    if req { ", required" } else { "" },
+                    if let Some(d) = &default { format!(", default {}", d) } else { String::new() },
+                    if let Some(e) = enum_vals { format!(", enum {}", serde_json::Value::Array(e.clone())) } else { String::new() },
+                );
+                if let Some(d) = default { eprint!(" [{d}]"); }
+                eprint!(": ");
+                let _ = std::io::stderr().flush();
+                let mut line = String::new();
+                if std::io::stdin().read_line(&mut line).is_err() { break; }
+                let trimmed = line.trim();
+                let v = if trimmed.is_empty() {
+                    if let Some(d) = default { d.clone() } else { continue; }
+                } else if typ == "number" || typ == "integer" {
+                    if let Ok(n) = trimmed.parse::<f64>() { serde_json::json!(n) } else { serde_json::Value::String(trimmed.into()) }
+                } else if typ == "boolean" {
+                    serde_json::Value::Bool(matches!(trimmed.to_lowercase().as_str(), "true" | "y" | "yes" | "1"))
+                } else {
+                    serde_json::Value::String(trimmed.into())
+                };
+                out.insert(name.clone(), v);
+            }
+        }
+        eprintln!("=== submitting ===\n");
+        ElicitationResult {
+            action: ElicitationAction::Accept,
+            content: Some(serde_json::Value::Object(out)),
+        }
+    }
+}
+
+fn synthesise_defaults(schema: &serde_json::Value) -> serde_json::Value {
+    let mut out = serde_json::Map::new();
+    let Some(props) = schema.get("properties").and_then(|v| v.as_object()) else {
+        return serde_json::Value::Object(out);
+    };
+    for (name, spec) in props {
+        if let Some(d) = spec.get("default") {
+            out.insert(name.clone(), d.clone());
+            continue;
+        }
+        let typ = spec.get("type").and_then(|v| v.as_str()).unwrap_or("string");
+        let v = match typ {
+            "number" | "integer" => serde_json::json!(0),
+            "boolean" => serde_json::json!(false),
+            "array" => serde_json::json!([]),
+            "object" => serde_json::json!({}),
+            _ => serde_json::Value::String(String::new()),
+        };
+        out.insert(name.clone(), v);
+    }
+    serde_json::Value::Object(out)
 }
 
 /// Parse a call spec.  Two forms accepted:

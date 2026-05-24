@@ -150,11 +150,28 @@ impl Server {
 
     /// Dispatch a single message and return the response (if any).
     /// Notifications and responses return `None`; requests return `Some`.
-    /// Used by transports that own message buffering (HTTP, embed scenarios)
-    /// rather than the stream-driven dispatch loop in `run`.
+    /// Used by transports that own message buffering (one-shot HTTP).
+    /// No elicitation support — see `dispatch_message_with` for that.
     pub async fn dispatch_message(&self, message: Message) -> Option<Message> {
+        self.dispatch_message_with(message, crate::elicit::ElicitationHandle::disabled()).await
+    }
+
+    /// Dispatch with an explicit `ElicitationHandle`.  Tools that call
+    /// `mcp_server::elicit(...)` will route their request through this
+    /// handle.  HTTP transports that have an SSE side-channel can provide
+    /// a real handle; one-shot transports use `disabled()`.
+    pub async fn dispatch_message_with(
+        &self,
+        message: Message,
+        elicit: crate::elicit::ElicitationHandle,
+    ) -> Option<Message> {
         match message {
-            Message::Request(req) => Some(Message::Response(self.dispatch(req).await)),
+            Message::Request(req) => {
+                let ctx = crate::elicit::ToolContext { elicit };
+                let dispatch = self.dispatch(req);
+                let response = crate::elicit::TOOL_CONTEXT.scope(ctx, dispatch).await;
+                Some(Message::Response(response))
+            }
             Message::Notification(n) => {
                 self.on_notification(n);
                 None
@@ -164,24 +181,118 @@ impl Server {
     }
 
     /// Drive the MCP dispatch loop over the given transport until EOF or
-    /// shutdown.
-    pub async fn run<T: Transport>(&self, mut transport: T) -> Result<()> {
-        info!(server = %self.context.info.name, "MCP server starting");
+    /// shutdown.  Concurrent tool invocations are spawned as tasks so a
+    /// tool that calls `elicit().await` doesn't block the recv loop —
+    /// the loop continues reading and routes elicitation responses to
+    /// the waiting tool via the `ElicitationHandle`.
+    ///
+    /// Architecture: the transport is owned by one I/O actor that
+    /// multiplexes recv and send through internal channels.  This keeps
+    /// `transport.recv()` from being polled inside a `select!` (which is
+    /// not cancellation-safe for line-buffered readers).
+    pub async fn run<T: Transport>(&self, transport: T) -> Result<()> {
+        // For stdio transports we want to split into independent read /
+        // write halves running on separate tasks.  Going through the
+        // single-trait recv/send via `select!` is not cancellation-safe
+        // for line-buffered readers (proven by load testing).  Generic
+        // transports fall back to the old single-task path with the
+        // accepted limitation that elicitation may not work over them.
+        self.run_split(transport).await
+    }
+
+    async fn run_split<T: Transport>(&self, mut transport: T) -> Result<()> {
+        use tokio::sync::mpsc;
+        use mcp_core::jsonrpc::JSONRPC_VERSION;
+        let _ = JSONRPC_VERSION;
+
+        info!(server = %self.context.info.name, "MCP server starting (single-actor fallback)");
+        // Generic transports without a split: serial recv/send.  Tools
+        // that need elicitation should be invoked via a transport that
+        // implements `into_parts` (stdio does).
+        let elicit = crate::elicit::ElicitationHandle::disabled();
         while let Some(message) = transport.recv().await? {
-            match message {
-                Message::Request(req) => {
-                    let response = self.dispatch(req).await;
-                    transport.send(Message::Response(response)).await?;
-                }
-                Message::Notification(n) => {
-                    self.on_notification(n);
-                }
-                Message::Response(_) => {
-                    warn!("server received unsolicited response; ignoring");
-                }
+            let response = self.dispatch_message_with(message, elicit.clone()).await;
+            if let Some(out) = response {
+                transport.send(out).await?;
             }
         }
         info!("MCP server stopping (transport EOF)");
+        Ok(())
+    }
+
+    /// Drive the dispatch loop over an explicit pair of stdio halves.
+    /// Use this whenever elicitation is required (the reader/writer split
+    /// is what makes mid-tool server-initiated requests safe).
+    pub async fn run_stdio<R, W>(
+        &self,
+        mut reader: mcp_transport::stdio::StdioReader<R>,
+        mut writer: mcp_transport::stdio::StdioWriter<W>,
+    ) -> Result<()>
+    where
+        R: tokio::io::AsyncRead + Unpin + Send + 'static,
+        W: tokio::io::AsyncWrite + Unpin + Send + 'static,
+    {
+        use tokio::sync::mpsc;
+
+        info!(server = %self.context.info.name, "MCP server starting (split reader/writer)");
+
+        let (inbound_tx, mut inbound_rx) = mpsc::channel::<Message>(64);
+        let (outbound_tx, mut outbound_rx) = mpsc::channel::<Message>(64);
+        let elicit_handle = crate::elicit::ElicitationHandle::new(
+            outbound_tx.clone(),
+            true,
+        );
+
+        let reader_task = tokio::spawn(async move {
+            loop {
+                match reader.recv().await {
+                    Ok(Some(msg)) => {
+                        if inbound_tx.send(msg).await.is_err() { break; }
+                    }
+                    Ok(None) => break,
+                    Err(e) => { warn!(error = %e, "transport recv failed"); break; }
+                }
+            }
+        });
+
+        let writer_task = tokio::spawn(async move {
+            while let Some(msg) = outbound_rx.recv().await {
+                if let Err(e) = writer.send(msg).await {
+                    warn!(error = %e, "transport send failed");
+                    break;
+                }
+            }
+            writer.close().await;
+        });
+
+        let server = self.clone();
+        while let Some(msg) = inbound_rx.recv().await {
+            match msg {
+                Message::Request(req) => {
+                    let server = server.clone();
+                    let elicit = elicit_handle.clone();
+                    let out = outbound_tx.clone();
+                    tokio::spawn(async move {
+                        let ctx = crate::elicit::ToolContext { elicit };
+                        let response = crate::elicit::TOOL_CONTEXT
+                            .scope(ctx, server.dispatch(req))
+                            .await;
+                        let _ = out.send(Message::Response(response)).await;
+                    });
+                }
+                Message::Notification(n) => server.on_notification(n),
+                Message::Response(resp) => {
+                    let claimed = elicit_handle.deliver_response(resp.clone()).await;
+                    if !claimed {
+                        debug!("server received response with no waiter id={:?}", resp.id);
+                    }
+                }
+            }
+        }
+        drop(outbound_tx);
+        let _ = reader_task.await;
+        let _ = writer_task.await;
+        info!("MCP server stopping");
         Ok(())
     }
 

@@ -5,13 +5,15 @@
 //! Inbound responses are matched to their pending oneshot senders by id;
 //! notifications and server-initiated requests are logged (Phase 1).
 
+use async_trait::async_trait;
 use mcp_core::{
     error::ErrorCode,
-    jsonrpc::{Message, Request, Response},
+    jsonrpc::{ErrorObject, Message, Request, Response},
     protocol::{
-        methods, CallToolParams, CallToolResult, ClientCapabilities, Implementation,
-        InitializeParams, InitializeResult, ListPromptsResult, ListResourcesResult,
-        ListToolsResult, PROTOCOL_VERSION,
+        methods, CallToolParams, CallToolResult, ClientCapabilities, ElicitationAction,
+        ElicitationParams, ElicitationResult, Implementation, InitializeParams,
+        InitializeResult, ListPromptsResult, ListResourcesResult, ListToolsResult,
+        PROTOCOL_VERSION,
     },
     Error, Id, Result,
 };
@@ -27,6 +29,23 @@ use tracing::{debug, warn};
 
 type Pending = Arc<Mutex<HashMap<i64, oneshot::Sender<Response>>>>;
 
+/// Implement this trait to handle server-initiated `elicitation/create`
+/// requests.  Wired via `Client::spawn_with_delegate`.
+#[async_trait]
+pub trait ElicitationDelegate: Send + Sync + 'static {
+    async fn on_elicit(&self, params: ElicitationParams) -> ElicitationResult;
+}
+
+/// Default delegate: always declines.  Safe for non-interactive use.
+pub struct DeclineAll;
+
+#[async_trait]
+impl ElicitationDelegate for DeclineAll {
+    async fn on_elicit(&self, _params: ElicitationParams) -> ElicitationResult {
+        ElicitationResult { action: ElicitationAction::Decline, content: None }
+    }
+}
+
 /// Asynchronous MCP client.
 pub struct Client {
     next_id: AtomicI64,
@@ -37,12 +56,119 @@ pub struct Client {
 }
 
 impl Client {
-    /// Spawn the I/O task and return a client handle.  Does not perform the
-    /// MCP initialise handshake — call `initialize` next.
-    pub fn spawn<T: Transport>(mut transport: T) -> Arc<Self> {
+    /// Spawn the I/O task with the default elicitation delegate (declines).
+    /// Equivalent to `spawn_with_delegate(transport, Arc::new(DeclineAll))`.
+    pub fn spawn<T: Transport>(transport: T) -> Arc<Self> {
+        Self::spawn_with_delegate(transport, Arc::new(DeclineAll))
+    }
+
+    /// Spawn a client over a `StdioTransport` after splitting it into
+    /// independent read/write halves.  Required for any usage involving
+    /// server-initiated requests (elicitation) — without the split, the
+    /// I/O loop is not cancellation-safe.
+    pub fn spawn_stdio<R, W>(
+        transport: mcp_transport::stdio::StdioTransport<R, W>,
+        delegate: Arc<dyn ElicitationDelegate>,
+    ) -> Arc<Self>
+    where
+        R: tokio::io::AsyncRead + Unpin + Send + 'static,
+        W: tokio::io::AsyncWrite + Unpin + Send + 'static,
+    {
+        let (reader, writer) = transport.into_parts();
+        Self::spawn_with_halves(reader, writer, delegate)
+    }
+
+    /// Spawn from explicit reader/writer halves.  Internal helper —
+    /// callers typically use `spawn_stdio`.
+    pub fn spawn_with_halves<R, W>(
+        mut reader: mcp_transport::stdio::StdioReader<R>,
+        mut writer: mcp_transport::stdio::StdioWriter<W>,
+        delegate: Arc<dyn ElicitationDelegate>,
+    ) -> Arc<Self>
+    where
+        R: tokio::io::AsyncRead + Unpin + Send + 'static,
+        W: tokio::io::AsyncWrite + Unpin + Send + 'static,
+    {
         let (outbox_tx, mut outbox_rx) = mpsc::channel::<Message>(64);
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
         let pending_io = Arc::clone(&pending);
+        let outbox_inbound = outbox_tx.clone();
+
+        // Reader task: always-blocking recv, never cancelled.
+        let reader_task = tokio::spawn(async move {
+            loop {
+                match reader.recv().await {
+                    Ok(Some(Message::Response(r))) => {
+                        if let Id::Number(n) = r.id {
+                            let waiter = {
+                                let mut p = pending_io.lock().await;
+                                p.remove(&n)
+                            };
+                            if let Some(w) = waiter { let _ = w.send(r); }
+                            else { debug!(id = n, "response with no waiter"); }
+                        } else {
+                            warn!("client: response with non-numeric id");
+                        }
+                    }
+                    Ok(Some(Message::Notification(n))) => {
+                        debug!(method = %n.method, "notification");
+                    }
+                    Ok(Some(Message::Request(req))) => {
+                        let delegate = Arc::clone(&delegate);
+                        let outbox = outbox_inbound.clone();
+                        tokio::spawn(async move {
+                            handle_server_request(req, delegate, outbox).await;
+                        });
+                    }
+                    Ok(None) => {
+                        debug!("transport EOF; client shutting down");
+                        break;
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "client reader: recv failed");
+                        break;
+                    }
+                }
+            }
+            let mut p = pending_io.lock().await;
+            p.clear();
+        });
+
+        // Writer task: drains outbox.
+        let writer_task = tokio::spawn(async move {
+            while let Some(msg) = outbox_rx.recv().await {
+                if let Err(e) = writer.send(msg).await {
+                    warn!(error = %e, "client writer: send failed");
+                    break;
+                }
+            }
+        });
+
+        // Combine into one join handle so the Drop semantics stay the same.
+        let io_task = tokio::spawn(async move {
+            let _ = reader_task.await;
+            let _ = writer_task.await;
+        });
+
+        Arc::new(Self {
+            next_id: AtomicI64::new(1),
+            pending,
+            outbox: outbox_tx,
+            _io_task: io_task,
+            server_info: Mutex::new(None),
+        })
+    }
+
+    /// Legacy: spawn with a generic transport (single-task; not safe for
+    /// elicitation under load).  Kept for backward compatibility.
+    pub fn spawn_with_delegate<T: Transport>(
+        mut transport: T,
+        delegate: Arc<dyn ElicitationDelegate>,
+    ) -> Arc<Self> {
+        let (outbox_tx, mut outbox_rx) = mpsc::channel::<Message>(64);
+        let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
+        let pending_io = Arc::clone(&pending);
+        let outbox_inbound = outbox_tx.clone();
 
         // Single I/O task owns the transport.  Multiplexes outbound (from the
         // mpsc outbox) and inbound (from `transport.recv`) using `select!`.
@@ -91,7 +217,11 @@ impl Client {
                                 debug!(method = %n.method, "notification");
                             }
                             Ok(Some(Message::Request(req))) => {
-                                debug!(method = %req.method, "server-initiated request (ignored in Phase 1)");
+                                let delegate = Arc::clone(&delegate);
+                                let outbox = outbox_inbound.clone();
+                                tokio::spawn(async move {
+                                    handle_server_request(req, delegate, outbox).await;
+                                });
                             }
                             Ok(None) => {
                                 debug!("transport EOF; client shutting down");
@@ -120,7 +250,9 @@ impl Client {
         })
     }
 
-    /// Perform the MCP initialise handshake.
+    /// Perform the MCP initialise handshake with `elicitation` capability
+    /// advertised by default — flip it off via `initialize_with(...)` if
+    /// the delegate is the default `DeclineAll`.
     pub async fn initialize(
         self: &Arc<Self>,
         client_info: Implementation,
@@ -205,4 +337,43 @@ impl Client {
         let parsed: R = serde_json::from_value(result_value)?;
         Ok(parsed)
     }
+}
+
+/// Dispatch a server-initiated request to the registered delegate and
+/// send the response back.  Only `elicitation/create` is supported in
+/// Phase 6; everything else replies with MethodNotFound.
+async fn handle_server_request(
+    req: Request,
+    delegate: Arc<dyn ElicitationDelegate>,
+    outbox: mpsc::Sender<Message>,
+) {
+    let id = req.id.clone();
+    let response = match req.method.as_str() {
+        methods::ELICITATION_CREATE => {
+            let params: ElicitationParams = match req.params
+                .and_then(|p| serde_json::from_value(p).ok())
+            {
+                Some(p) => p,
+                None => {
+                    let err = ErrorObject::new(ErrorCode::InvalidParams.as_i32(), "invalid elicitation params");
+                    return drop(outbox.send(Message::Response(Response::failure(id, err))).await);
+                }
+            };
+            let result = delegate.on_elicit(params).await;
+            match serde_json::to_value(result) {
+                Ok(v) => Response::success(id, v),
+                Err(e) => Response::failure(id, ErrorObject::new(
+                    ErrorCode::InternalError.as_i32(), e.to_string()
+                )),
+            }
+        }
+        other => {
+            warn!(method = %other, "server-initiated request: method not supported by this client");
+            Response::failure(id, ErrorObject::new(
+                ErrorCode::MethodNotFound.as_i32(),
+                format!("method '{other}' not supported by client"),
+            ))
+        }
+    };
+    let _ = outbox.send(Message::Response(response)).await;
 }

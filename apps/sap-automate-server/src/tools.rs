@@ -940,6 +940,233 @@ fn kb_graph_neighborhood(ctx: &Arc<ServerContext>) -> ToolDescriptor {
 }
 
 // ===========================================================================
+// Workflow tools (Phase 6 — MCP 2025-06-18 elicitation)
+// ===========================================================================
+//
+// Each tool walks an SAP-typical workflow that pauses mid-execution to
+// confirm a high-stakes parameter with the user (cost centre, customer
+// number, transport target).  This is the killer use case for the
+// elicitation primitive from paper §II-B.
+
+pub fn workflow_tools(ctx: &Arc<ServerContext>) -> Vec<ToolDescriptor> {
+    vec![
+        workflow_create_purchase_order(ctx),
+        workflow_maintain_customer_master(ctx),
+        workflow_release_transport(ctx),
+    ]
+}
+
+fn workflow_create_purchase_order(_ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        async move {
+            #[derive(Deserialize)]
+            struct PoArgs {
+                #[serde(default)] vendor: Option<String>,
+                #[serde(default)] material: Option<String>,
+                #[serde(default)] quantity: Option<f64>,
+            }
+            let args: PoArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("sap.workflow.create_purchase_order: {e}"))),
+            };
+
+            // Elicit the high-stakes confirmation parameters.
+            let schema = mcp_server::object_schema(
+                serde_json::json!({
+                    "vendor":      { "type": "string",  "description": "Vendor (LIFNR), e.g. 'V-100100'", "default": args.vendor.unwrap_or_default() },
+                    "material":    { "type": "string",  "description": "Material (MATNR)", "default": args.material.unwrap_or_default() },
+                    "quantity":    { "type": "number",  "description": "Order quantity", "default": args.quantity.unwrap_or(0.0) },
+                    "cost_centre": { "type": "string",  "description": "Cost centre (KOSTL), e.g. '1000'" },
+                    "company_code":{ "type": "string",  "description": "Company code (BUKRS)", "enum": ["1000", "2000", "3000"], "default": "1000" },
+                    "currency":    { "type": "string",  "description": "Document currency", "enum": ["USD", "EUR", "GBP", "JPY", "SGD"], "default": "USD" },
+                    "delivery_date":{ "type": "string", "description": "Requested delivery date (YYYY-MM-DD)" },
+                }).as_object().unwrap().clone(),
+                vec!["vendor".into(), "material".into(), "quantity".into(), "cost_centre".into(), "company_code".into(), "delivery_date".into()],
+            );
+            let elicit = mcp_server::elicit(
+                "Confirm purchase-order details before posting. Cost centre + delivery date are mandatory.",
+                schema,
+            ).await;
+
+            use mcp_core::ElicitationAction;
+            match elicit.action {
+                ElicitationAction::Accept => {
+                    let content = elicit.content.unwrap_or_else(|| serde_json::json!({}));
+                    Ok(CallToolResult::text(format!(
+                        "Purchase order confirmed (mock execution; no real BAPI fired):\n\n{}\n\nNext step (when enable-writes): sap.rfc.call BAPI_PO_CREATE1.",
+                        serde_json::to_string_pretty(&content).unwrap_or_default(),
+                    )))
+                }
+                ElicitationAction::Decline => {
+                    Ok(CallToolResult::text("Purchase order cancelled by user (declined elicitation)."))
+                }
+                ElicitationAction::Cancel => {
+                    Ok(CallToolResult::error("Purchase order cancelled (user aborted or elicitation unavailable). No action taken."))
+                }
+            }
+        }
+    });
+    ToolDescriptor::new(
+        "sap.workflow.create_purchase_order",
+        Some("Walk the user through a guided purchase-order creation. Mid-execution the tool elicits vendor, material, quantity, cost centre, company code, currency, and delivery date — declining the form cancels the operation without side-effects. Wires BAPI_PO_CREATE1 in write mode.".into()),
+        ToolInputSchema::from_value(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "vendor": {"type": "string", "description": "Initial vendor hint"},
+                "material": {"type": "string", "description": "Initial material hint"},
+                "quantity": {"type": "number", "description": "Initial quantity hint"}
+            },
+            "additionalProperties": false
+        })),
+        Arc::new(handler),
+    ).with_writes()
+}
+
+fn workflow_maintain_customer_master(_ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        async move {
+            #[derive(Deserialize)]
+            struct CmArgs {
+                #[serde(default)] customer: Option<String>,
+            }
+            let args: CmArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("sap.workflow.maintain_customer_master: {e}"))),
+            };
+            // First elicit: which fields to change.
+            let pick_schema = mcp_server::object_schema(
+                serde_json::json!({
+                    "customer":     { "type": "string", "description": "Customer (KUNNR)", "default": args.customer.unwrap_or_default() },
+                    "scope":        { "type": "string", "description": "Which view to maintain", "enum": ["general_data", "company_code_data", "sales_area_data"], "default": "general_data" },
+                    "company_code": { "type": "string", "description": "Company code (only required for company_code_data scope)" },
+                }).as_object().unwrap().clone(),
+                vec!["customer".into(), "scope".into()],
+            );
+            let pick = mcp_server::elicit("Select customer and which data view to maintain.", pick_schema).await;
+
+            use mcp_core::ElicitationAction;
+            if pick.action != ElicitationAction::Accept {
+                return Ok(CallToolResult::error("Customer master maintenance cancelled at scope selection."));
+            }
+            let picked = pick.content.unwrap_or(serde_json::Value::Null);
+            let customer = picked.get("customer").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let scope = picked.get("scope").and_then(|v| v.as_str()).unwrap_or("general_data").to_string();
+
+            // Second elicit: scoped fields.
+            let fields_schema = match scope.as_str() {
+                "general_data" => serde_json::json!({
+                    "name1": {"type": "string", "description": "Name 1"},
+                    "city":  {"type": "string", "description": "City"},
+                    "country": {"type": "string", "description": "Country (ISO-2)", "enum": ["DE", "US", "GB", "JP", "SG"]},
+                }),
+                "company_code_data" => serde_json::json!({
+                    "recon_account": {"type": "string", "description": "Reconciliation account (HKONT), e.g. 140000"},
+                    "payment_terms": {"type": "string", "description": "Payment terms (ZTERM)"},
+                    "dunning_area":  {"type": "string", "description": "Dunning area"},
+                }),
+                "sales_area_data" => serde_json::json!({
+                    "sales_org":      {"type": "string", "description": "Sales organisation"},
+                    "distribution_channel": {"type": "string", "description": "Distribution channel"},
+                    "division":       {"type": "string", "description": "Division"},
+                    "incoterms":      {"type": "string", "enum": ["EXW", "FCA", "CIF", "DAP", "DDP"]},
+                }),
+                _ => serde_json::json!({}),
+            };
+            let confirm_schema = mcp_server::object_schema(
+                fields_schema.as_object().unwrap().clone(),
+                Vec::new(),
+            );
+            let confirm = mcp_server::elicit(
+                &format!("Enter new values for customer {customer} ({scope} view). Leave fields blank to keep current values."),
+                confirm_schema,
+            ).await;
+
+            match confirm.action {
+                ElicitationAction::Accept => {
+                    let changes = confirm.content.unwrap_or(serde_json::json!({}));
+                    Ok(CallToolResult::text(format!(
+                        "Customer master change confirmed (mock):\n  customer: {customer}\n  scope:    {scope}\n  changes:\n{}\n\nNext step (when enable-writes): sap.rfc.call BAPI_CUSTOMER_CHANGEFROMDATA.",
+                        serde_json::to_string_pretty(&changes).unwrap_or_default(),
+                    )))
+                }
+                ElicitationAction::Decline => Ok(CallToolResult::text("Customer master change declined; no action taken.")),
+                ElicitationAction::Cancel  => Ok(CallToolResult::error("Customer master cancelled.")),
+            }
+        }
+    });
+    ToolDescriptor::new(
+        "sap.workflow.maintain_customer_master",
+        Some("Two-step elicitation walking the user through a customer master change: pick the data view, then fill in the scoped fields. Demonstrates *chained* elicitation calls — each step has its own form and either step can be declined safely.".into()),
+        ToolInputSchema::from_value(serde_json::json!({
+            "type": "object",
+            "properties": {"customer": {"type": "string", "description": "Customer hint"}},
+            "additionalProperties": false
+        })),
+        Arc::new(handler),
+    ).with_writes()
+}
+
+fn workflow_release_transport(_ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        async move {
+            #[derive(Deserialize)]
+            struct TrArgs { transport: Option<String> }
+            let args: TrArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("sap.workflow.release_transport: {e}"))),
+            };
+            let initial = args.transport.unwrap_or_default();
+            let schema = mcp_server::object_schema(
+                serde_json::json!({
+                    "transport":           { "type": "string", "description": "Transport request ID (TRKORR), e.g. ZTRA01K900123", "default": initial },
+                    "target_system":       { "type": "string", "description": "Target system", "enum": ["DEV", "QA", "PRODUCTION"], "default": "QA" },
+                    "release_dependents":  { "type": "boolean", "description": "Release dependent transports?", "default": false },
+                    "skip_atc":            { "type": "boolean", "description": "Skip ATC checks (dangerous)", "default": false },
+                    "confirmation_phrase": { "type": "string", "description": "Type the transport ID again to confirm" },
+                }).as_object().unwrap().clone(),
+                vec!["transport".into(), "target_system".into(), "confirmation_phrase".into()],
+            );
+            let elicit = mcp_server::elicit(
+                "Transport release is irreversible in production. Confirm details and re-enter the transport ID to proceed.",
+                schema,
+            ).await;
+
+            use mcp_core::ElicitationAction;
+            match elicit.action {
+                ElicitationAction::Accept => {
+                    let v = elicit.content.unwrap_or(serde_json::Value::Null);
+                    let tr     = v.get("transport").and_then(|x| x.as_str()).unwrap_or("");
+                    let phrase = v.get("confirmation_phrase").and_then(|x| x.as_str()).unwrap_or("");
+                    let target = v.get("target_system").and_then(|x| x.as_str()).unwrap_or("QA");
+                    if tr != phrase {
+                        return Ok(CallToolResult::error(format!(
+                            "Confirmation phrase '{phrase}' does not match transport '{tr}'. Release aborted.",
+                        )));
+                    }
+                    Ok(CallToolResult::text(format!(
+                        "Transport release plan confirmed (mock):\n  transport:           {tr}\n  target_system:       {target}\n  release_dependents:  {}\n  skip_atc:            {}\n\nNext step (when enable-writes): TMS_MGR_FORWARD_TR_REQUEST.",
+                        v.get("release_dependents").and_then(|x| x.as_bool()).unwrap_or(false),
+                        v.get("skip_atc").and_then(|x| x.as_bool()).unwrap_or(false),
+                    )))
+                }
+                ElicitationAction::Decline => Ok(CallToolResult::text("Transport release declined; no action taken.")),
+                ElicitationAction::Cancel  => Ok(CallToolResult::error("Transport release cancelled (client lacks elicitation capability — refusing to proceed without confirmation).")),
+            }
+        }
+    });
+    ToolDescriptor::new(
+        "sap.workflow.release_transport",
+        Some("Release a transport request with a confirmation form. Requires the user to re-type the transport ID and explicitly opt in to dangerous flags (skip_atc, release_dependents). Refuses entirely on clients that don't advertise the elicitation capability.".into()),
+        ToolInputSchema::from_value(serde_json::json!({
+            "type": "object",
+            "properties": {"transport": {"type": "string", "description": "Initial transport hint"}},
+            "additionalProperties": false
+        })),
+        Arc::new(handler),
+    ).with_writes()
+}
+
+// ===========================================================================
 // helpers
 // ===========================================================================
 

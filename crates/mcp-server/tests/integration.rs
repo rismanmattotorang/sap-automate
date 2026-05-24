@@ -54,6 +54,114 @@ async fn handshake_list_call_roundtrip() {
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn elicitation_round_trip() {
+    use mcp_core::{ElicitationAction, ElicitationParams, ElicitationResult, ToolContent};
+    use mcp_server::{registry::ToolFn, elicit, object_schema, ExposurePolicy};
+
+    // Build a server with one tool that elicits.
+    let server = Server::builder("test-server", "0.1.0")
+        .exposure(ExposurePolicy::All)
+        .tool(
+            ToolDescriptor::new(
+                "confirm.amount",
+                Some("Elicit and echo the amount".into()),
+                mcp_core::ToolInputSchema::from_value(serde_json::json!({"type":"object","additionalProperties":false})),
+                Arc::new(ToolFn(|_args: serde_json::Value| async move {
+                    let schema = object_schema(
+                        serde_json::json!({
+                            "amount": {"type": "number"},
+                            "currency": {"type": "string", "enum": ["USD", "EUR"]}
+                        }).as_object().unwrap().clone(),
+                        vec!["amount".into(), "currency".into()],
+                    );
+                    let result = elicit("Confirm the amount:", schema).await;
+                    Ok(match result.action {
+                        ElicitationAction::Accept => mcp_core::CallToolResult {
+                            content: vec![ToolContent::text(format!("got: {}", result.content.unwrap_or_default()))],
+                            is_error: false,
+                        },
+                        _ => mcp_core::CallToolResult::error("user declined"),
+                    })
+                }))
+            ).with_writes()
+        )
+        .build();
+
+    // Client delegate: auto-accept with hard-coded values.
+    struct AutoAccept;
+    #[async_trait::async_trait]
+    impl mcp_client::ElicitationDelegate for AutoAccept {
+        async fn on_elicit(&self, _params: ElicitationParams) -> ElicitationResult {
+            ElicitationResult {
+                action: ElicitationAction::Accept,
+                content: Some(serde_json::json!({ "amount": 100, "currency": "USD" })),
+            }
+        }
+    }
+
+    let (s_rx, c_tx) = tokio::io::duplex(8192);
+    let (c_rx, s_tx) = tokio::io::duplex(8192);
+    tokio::spawn(async move {
+        let (reader, writer) = StdioTransport::new(s_rx, s_tx).into_parts();
+        server.run_stdio(reader, writer).await.unwrap();
+    });
+    let client = Client::spawn_with_delegate(StdioTransport::new(c_rx, c_tx), Arc::new(AutoAccept));
+
+    client.initialize(
+        Implementation { name: "test-client".into(), version: "0.1.0".into() },
+        ClientCapabilities::default().with_elicitation(),
+    ).await.unwrap();
+
+    let result = client.call_tool("confirm.amount", Some(serde_json::json!({}))).await.unwrap();
+    assert!(!result.is_error, "tool returned error: {:?}", result);
+    let text = match &result.content[0] {
+        ToolContent::Text { text } => text.clone(),
+        other => panic!("unexpected content: {other:?}"),
+    };
+    assert!(text.contains(r#""amount":100"#) || text.contains(r#""amount":100.0"#),
+        "expected amount=100 echoed back, got: {text}");
+    assert!(text.contains(r#""currency":"USD""#), "expected currency=USD echoed back, got: {text}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn elicitation_declined_returns_decline_action() {
+    use mcp_core::{ElicitationAction, ElicitationParams, ElicitationResult};
+    use mcp_server::{registry::ToolFn, elicit, ExposurePolicy};
+
+    let server = Server::builder("test-server", "0.1.0")
+        .exposure(ExposurePolicy::All)
+        .tool(ToolDescriptor::new(
+            "ask.action",
+            Some("Surface the elicit action".into()),
+            mcp_core::ToolInputSchema::from_value(serde_json::json!({"type":"object","additionalProperties":false})),
+            Arc::new(ToolFn(|_args: serde_json::Value| async move {
+                let r = elicit("Are you sure?", serde_json::json!({"type":"object"})).await;
+                Ok(mcp_core::CallToolResult::text(format!("action={:?}", r.action)))
+            }))
+        ).with_writes())
+        .build();
+
+    let (s_rx, c_tx) = tokio::io::duplex(8192);
+    let (c_rx, s_tx) = tokio::io::duplex(8192);
+    tokio::spawn(async move {
+        let (reader, writer) = StdioTransport::new(s_rx, s_tx).into_parts();
+        server.run_stdio(reader, writer).await.unwrap();
+    });
+    // Default delegate is DeclineAll
+    let client = Client::spawn(StdioTransport::new(c_rx, c_tx));
+    client.initialize(
+        Implementation { name: "test-client".into(), version: "0.1.0".into() },
+        ClientCapabilities::default().with_elicitation(),
+    ).await.unwrap();
+
+    let result = client.call_tool("ask.action", Some(serde_json::json!({}))).await.unwrap();
+    match &result.content[0] {
+        ToolContent::Text { text } => assert!(text.contains("Decline"), "got: {text}"),
+        other => panic!("unexpected content: {other:?}"),
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unknown_tool_returns_protocol_error() {
     let server = Server::builder("test-server", "0.1.0").build();

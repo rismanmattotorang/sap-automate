@@ -14,4 +14,5 @@ pub use protocol::{
     Resource, ListResourcesResult, ReadResourceParams, ReadResourceResult, ResourceContents,
     Prompt, PromptArgument, ListPromptsResult, GetPromptParams, GetPromptResult, PromptMessage,
     Role,
+    ElicitationParams, ElicitationResult, ElicitationAction,
 };

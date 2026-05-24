@@ -23,12 +23,26 @@ pub struct Implementation {
 pub struct ClientCapabilities {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sampling: Option<Value>,
+    /// Set to `Some({})` to indicate the client can render structured
+    /// elicitation forms (paper §II-B; MCP 2025-06-18).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub elicitation: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub roots: Option<RootsCapability>,
     #[serde(flatten)]
     pub extra: serde_json::Map<String, Value>,
+}
+
+impl ClientCapabilities {
+    /// Builder helper: declare elicitation support.
+    pub fn with_elicitation(mut self) -> Self {
+        self.elicitation = Some(Value::Object(Default::default()));
+        self
+    }
+
+    pub fn supports_elicitation(&self) -> bool {
+        self.elicitation.is_some()
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -303,5 +317,44 @@ pub mod methods {
     pub const PROMPTS_LIST: &str = "prompts/list";
     pub const PROMPTS_GET: &str = "prompts/get";
 
+    /// Server-initiated request: pause a tool mid-execution and ask the
+    /// user for structured form input (MCP 2025-06-18 elicitation).
+    pub const ELICITATION_CREATE: &str = "elicitation/create";
+
     pub const SHUTDOWN: &str = "shutdown";
+}
+
+// ============================================================================
+// Elicitation (paper §II-B; MCP 2025-06-18)
+// ============================================================================
+
+/// Server → client request body.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElicitationParams {
+    /// Human-readable explanation for the user (rendered above the form).
+    pub message: String,
+    /// JSON Schema describing the form.  Subset accepted by the spec:
+    /// `type: object`, primitive properties, enums, defaults.
+    #[serde(rename = "requestedSchema")]
+    pub requested_schema: Value,
+}
+
+/// Client → server response body.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElicitationResult {
+    pub action: ElicitationAction,
+    /// Form values when `action = Accept`; absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<Value>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ElicitationAction {
+    /// User submitted the form.
+    Accept,
+    /// User explicitly declined (e.g. closed the dialog with "Decline").
+    Decline,
+    /// User cancelled the operation entirely.
+    Cancel,
 }

@@ -177,7 +177,14 @@ async fn main() -> anyhow::Result<()> {
     );
 
     match cli.transport.as_str() {
-        "stdio" => server.run(StdioTransport::from_stdio()).await?,
+        "stdio" => {
+            // Split into independent read/write halves so a tool that
+            // calls elicit().await doesn't block the reader.
+            let (reader, writer) = StdioTransport::new(
+                tokio::io::stdin(), tokio::io::stdout(),
+            ).into_parts();
+            server.run_stdio(reader, writer).await?
+        }
         "http" => {
             let bind: std::net::SocketAddr = cli.bind.parse()
                 .map_err(|e| anyhow::anyhow!("invalid --bind '{}': {e}", cli.bind))?;
@@ -224,6 +231,9 @@ fn build_server(ctx: Arc<ServerContext>, agents_md: &Option<String>, read_only: 
 
     // Graph tools (Phase 5A — GraphRAG + HippoRAG + RAPTOR).
     for desc in tools::graph_tools(&ctx) { builder = builder.tool(desc); }
+
+    // Workflow tools (Phase 6 — MCP 2025-06-18 elicitation).
+    for desc in tools::workflow_tools(&ctx) { builder = builder.tool(desc); }
 
     // Resources.
     for desc in resources::all(&ctx) { builder = builder.resource(desc); }
