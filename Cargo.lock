@@ -1714,6 +1714,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "sap-automate-graph",
  "sap-automate-ingest",
  "sap-automate-kb",
  "sap-automate-rag",
@@ -1730,6 +1731,17 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
+name = "sap-automate-graph"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
  "tracing",
 ]
 
@@ -1794,6 +1806,7 @@ name = "sap-automate-rag"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "sap-automate-graph",
  "sap-automate-kb",
  "serde",
  "serde_json",
@@ -1824,6 +1837,7 @@ dependencies = [
  "mcp-server",
  "mcp-transport",
  "sap-automate-adt",
+ "sap-automate-graph",
  "sap-automate-ingest",
  "sap-automate-kb",
  "sap-automate-rag",

@@ -43,6 +43,20 @@ The server surfaces this as a structured `[DataPreviewBlocked]` error.
 Fall back to `sap.table.read` (RFC path) — it has its own buffer-overflow
 safety (max 1000 rows).
 
+## Choose the right retrieval layer
+
+The server exposes four retrieval surfaces; pick deliberately:
+
+| Layer | Tool | When |
+|---|---|---|
+| **L2 Hybrid** | `sap.docs.search` | Default. Lexical + semantic + RRF + rerank over the document corpus. |
+| **L3 GraphRAG** | `kb.global_query` | Global / analytical questions ("which apps touch period close?"). Returns community summaries spanning multiple domains. |
+| **L4 HippoRAG** | `kb.multi_hop` | Multi-hop / impact / where-used queries ("what depends on BAPI_X?"). PPR-ranked, hop-distance-bounded. |
+| **L5 RAPTOR** | `kb.summarise` | Granularity-aware orientation. Level 0 = leaves, 1 = communities, 2 = SAP module roll-ups. |
+
+When in doubt, start with `sap.docs.search`. Promote to `kb.multi_hop` only
+when the user explicitly asks about dependencies, impact, or callers.
+
 ## Table reads
 
 - Always set `fields` (column projection) — do not fetch all columns by default.

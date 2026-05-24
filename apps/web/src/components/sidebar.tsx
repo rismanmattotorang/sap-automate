@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 const NAV = [
   { href: '/', label: 'Operations',    icon: '◆', desc: 'live tool stats, latency budget' },
   { href: '/query-lab', label: 'Query Lab',    icon: '☰', desc: 'dense / sparse / RRF / rerank' },
+  { href: '/graph', label: 'Graph Lab',    icon: '◈', desc: 'GraphRAG · HippoRAG · RAPTOR' },
   { href: '/tools', label: 'Tool Explorer',    icon: '⌘', desc: 'schema-driven forms' },
   { href: '/skills', label: 'Skill Lab',    icon: '✱', desc: 'instantiate prompt templates' },
   { href: '/resources', label: 'Resources',    icon: '⊞', desc: 'sap-rfc / sap-table / agents' },

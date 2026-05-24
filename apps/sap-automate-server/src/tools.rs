@@ -765,6 +765,181 @@ fn adt_activate(ctx: &Arc<ServerContext>) -> ToolDescriptor {
 }
 
 // ===========================================================================
+// Graph tools (Phase 5A — GraphRAG L3, HippoRAG L4, RAPTOR L5)
+// ===========================================================================
+
+pub fn graph_tools(ctx: &Arc<ServerContext>) -> Vec<ToolDescriptor> {
+    vec![
+        kb_multi_hop(ctx),
+        kb_global_query(ctx),
+        kb_summarise(ctx),
+        kb_graph_neighborhood(ctx),
+    ]
+}
+
+#[derive(Deserialize)]
+struct MultiHopArgs {
+    query: String,
+    #[serde(default = "default_max_hops")]
+    max_hops: u32,
+    #[serde(default = "default_top_k_graph")]
+    top_k: usize,
+    #[serde(default = "default_max_seeds")]
+    max_seeds: usize,
+}
+fn default_max_hops() -> u32 { 4 }
+fn default_top_k_graph() -> usize { 8 }
+fn default_max_seeds() -> usize { 3 }
+
+fn kb_multi_hop(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            let args: MultiHopArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("kb.multi_hop: invalid arguments: {e}"))),
+            };
+            let response = ctx.graph.multi_hop(&args.query, args.max_hops, args.top_k, args.max_seeds);
+            render_json("kb.multi_hop", &response)
+        }
+    });
+    ToolDescriptor::new(
+        "kb.multi_hop",
+        Some("HippoRAG-style multi-hop traversal (Personalised PageRank) across the SAP knowledge graph. Use this for impact / where-used / dependency-chain queries. Returns nodes with hop distance from any seed.".into()),
+        ToolInputSchema::from_value(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "max_hops": {"type": "integer", "minimum": 1, "maximum": 6, "default": 4},
+                "top_k": {"type": "integer", "minimum": 1, "maximum": 50, "default": 8},
+                "max_seeds": {"type": "integer", "minimum": 1, "maximum": 10, "default": 3}
+            },
+            "required": ["query"],
+            "additionalProperties": false
+        })),
+        Arc::new(handler),
+    )
+}
+
+#[derive(Deserialize)]
+struct GlobalQueryArgs {
+    query: String,
+    #[serde(default = "default_top_k_3")]
+    top_k: usize,
+}
+fn default_top_k_3() -> usize { 3 }
+
+fn kb_global_query(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            let args: GlobalQueryArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("kb.global_query: invalid arguments: {e}"))),
+            };
+            let response = ctx.graph.community_query(&args.query, args.top_k);
+            render_json("kb.global_query", &response)
+        }
+    });
+    ToolDescriptor::new(
+        "kb.global_query",
+        Some("Microsoft GraphRAG community-level Q&A. Returns the top communities (clusters of related entities) that overlap the query, with their members and synthesised summary. Use this for global / analytical / cross-domain questions.".into()),
+        ToolInputSchema::from_value(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "top_k": {"type": "integer", "minimum": 1, "maximum": 10, "default": 3}
+            },
+            "required": ["query"],
+            "additionalProperties": false
+        })),
+        Arc::new(handler),
+    )
+}
+
+#[derive(Deserialize)]
+struct SummariseArgs {
+    #[serde(default = "default_level_2")]
+    level: u32,
+    #[serde(default = "default_top_k_10")]
+    top_k: usize,
+}
+fn default_level_2() -> u32 { 2 }
+fn default_top_k_10() -> usize { 10 }
+
+fn kb_summarise(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            let args: SummariseArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("kb.summarise: invalid arguments: {e}"))),
+            };
+            let response = ctx.graph.raptor_summary(args.level, args.top_k);
+            render_json("kb.summarise", &response)
+        }
+    });
+    ToolDescriptor::new(
+        "kb.summarise",
+        Some("RAPTOR hierarchical summary at the requested level (0 = leaves, 1 = Louvain communities, 2 = SAP module roll-ups). Use this for granularity-aware orientation queries.".into()),
+        ToolInputSchema::from_value(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "level": {"type": "integer", "minimum": 0, "maximum": 2, "default": 2},
+                "top_k": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10}
+            },
+            "additionalProperties": false
+        })),
+        Arc::new(handler),
+    )
+}
+
+#[derive(Deserialize)]
+struct NeighborhoodArgs {
+    seeds: Vec<String>,
+    #[serde(default = "default_max_hops")]
+    max_hops: u32,
+    #[serde(default = "default_top_k_graph")]
+    top_k: usize,
+}
+
+fn kb_graph_neighborhood(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            let args: NeighborhoodArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("kb.graph_neighborhood: invalid arguments: {e}"))),
+            };
+            if args.seeds.is_empty() {
+                return Ok(CallToolResult::error("kb.graph_neighborhood: seeds must not be empty"));
+            }
+            let response = ctx.graph.neighborhood(&args.seeds, args.max_hops, args.top_k);
+            render_json("kb.graph_neighborhood", &response)
+        }
+    });
+    ToolDescriptor::new(
+        "kb.graph_neighborhood",
+        Some("Multi-hop neighbourhood of an explicit set of entity IDs (e.g. ['abap:ZFIN_POST_JE', 'rfc:BAPI_ACC_DOCUMENT_POST']). PPR-ranked. Use after sap.docs.search or abap.adt.where_used has identified concrete entities.".into()),
+        ToolInputSchema::from_value(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "seeds": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 20},
+                "max_hops": {"type": "integer", "minimum": 1, "maximum": 6, "default": 4},
+                "top_k": {"type": "integer", "minimum": 1, "maximum": 50, "default": 8}
+            },
+            "required": ["seeds"],
+            "additionalProperties": false
+        })),
+        Arc::new(handler),
+    )
+}
+
+// ===========================================================================
 // helpers
 // ===========================================================================
 

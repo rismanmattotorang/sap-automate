@@ -10,7 +10,13 @@
 //!
 //! Layers L3 (GraphRAG), L4 (HippoRAG), L5 (RAPTOR) come in Phase 5A.
 
+pub mod graph_layer;
 pub mod rerank;
+
+pub use graph_layer::{
+    CommunityQueryResponse, CommunityView, GraphEngine, GraphSearchHit, GraphSearchResponse,
+    RaptorSummaryResponse, RaptorView,
+};
 
 use sap_automate_kb::{Domain, KnowledgeStore, SearchHit, SearchQuery};
 use serde::{Deserialize, Serialize};

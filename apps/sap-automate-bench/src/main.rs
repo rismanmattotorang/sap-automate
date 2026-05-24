@@ -6,9 +6,10 @@
 //! Paper §X-D gate: P95 hybrid retrieval < 80 ms over the pilot corpus.
 
 use clap::Parser;
+use sap_automate_graph::InMemoryGraph;
 use sap_automate_ingest::{EmbeddingClient, HelpPortalCrawler, IngestionPipeline, MockEmbedder};
 use sap_automate_kb::{InMemoryKb, KnowledgeStore};
-use sap_automate_rag::{MockReranker, Query, RagEngine};
+use sap_automate_rag::{GraphEngine, MockReranker, Query, RagEngine};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -42,6 +43,15 @@ struct Cli {
     /// Acceptance gate (ms).  Process exits non-zero if P95 exceeds it.
     #[arg(long, default_value_t = 80)]
     gate_p95_ms: u64,
+
+    /// Also benchmark the Phase 5A graph layer (HippoRAG multi-hop).
+    /// Paper §X-H gate: P95 < 400 ms for ≤4-hop queries.
+    #[arg(long)]
+    graph: bool,
+
+    /// Graph multi-hop P95 gate (ms).  Paper §X-H default.
+    #[arg(long, default_value_t = 400)]
+    graph_gate_p95_ms: u64,
 }
 
 #[tokio::main]
@@ -124,12 +134,72 @@ async fn main() -> anyhow::Result<()> {
     let p95_ms = p(0.95) as f64 / 1000.0;
     let gate = cli.gate_p95_ms as f64;
     if p95_ms <= gate {
-        println!("\n✓ ACCEPTANCE GATE PASSED: P95 = {p95_ms:.3} ms ≤ {gate:.0} ms");
-        Ok(())
+        println!("\n✓ Phase 3 ACCEPTANCE GATE PASSED: P95 = {p95_ms:.3} ms ≤ {gate:.0} ms");
     } else {
-        println!("\n✗ ACCEPTANCE GATE FAILED: P95 = {p95_ms:.3} ms > {gate:.0} ms");
-        Err(anyhow::anyhow!("P95 gate failed"))
+        println!("\n✗ Phase 3 ACCEPTANCE GATE FAILED: P95 = {p95_ms:.3} ms > {gate:.0} ms");
+        return Err(anyhow::anyhow!("P95 gate failed"));
     }
+
+    // ---------------------------------------------------------------------
+    // Phase 5A graph bench (paper §X-H acceptance gate).
+    // ---------------------------------------------------------------------
+    if cli.graph {
+        println!("\n→ Phase 5A graph bench: HippoRAG multi-hop P95 < {} ms gate", cli.graph_gate_p95_ms);
+        let kg = Arc::new(InMemoryGraph::with_demo_corpus());
+        let engine = GraphEngine::new(kg);
+        println!("→ Graph: {} nodes, {} edges, {} communities",
+            engine.graph.stats().node_count,
+            engine.graph.stats().edge_count,
+            engine.communities.communities.len(),
+        );
+        let graph_workload = graph_workload_queries();
+        let mut g_samples: Vec<u64> = Vec::with_capacity(cli.n);
+        let g_start = Instant::now();
+        for i in 0..cli.n {
+            let q = &graph_workload[i % graph_workload.len()];
+            let t0 = Instant::now();
+            let _ = engine.multi_hop(q, 4, 8, 3);
+            g_samples.push(t0.elapsed().as_micros() as u64);
+        }
+        let g_wall = g_start.elapsed();
+        g_samples.sort_unstable();
+        let gn = g_samples.len();
+        let gp = |q: f64| g_samples[(((gn as f64) * q) as usize).min(gn - 1)];
+        let gmean: u64 = g_samples.iter().sum::<u64>() / gn as u64;
+        println!("\n== Multi-hop latency over {gn} queries ({:.2}s wall, {:.0} q/s)",
+            g_wall.as_secs_f64(), gn as f64 / g_wall.as_secs_f64());
+        println!("  P50: {:>7} µs   ({:.3} ms)", gp(0.50), gp(0.50) as f64 / 1000.0);
+        println!("  P95: {:>7} µs   ({:.3} ms)", gp(0.95), gp(0.95) as f64 / 1000.0);
+        println!("  P99: {:>7} µs   ({:.3} ms)", gp(0.99), gp(0.99) as f64 / 1000.0);
+        println!("  Max: {:>7} µs   ({:.3} ms)", *g_samples.last().unwrap(), *g_samples.last().unwrap() as f64 / 1000.0);
+        println!("  Mean: {:>5} µs   ({:.3} ms)", gmean, gmean as f64 / 1000.0);
+        let gp95_ms = gp(0.95) as f64 / 1000.0;
+        let ggate = cli.graph_gate_p95_ms as f64;
+        if gp95_ms <= ggate {
+            println!("\n✓ Phase 5A ACCEPTANCE GATE PASSED: P95 = {gp95_ms:.3} ms ≤ {ggate:.0} ms");
+        } else {
+            println!("\n✗ Phase 5A ACCEPTANCE GATE FAILED: P95 = {gp95_ms:.3} ms > {ggate:.0} ms");
+            return Err(anyhow::anyhow!("graph P95 gate failed"));
+        }
+    }
+
+    Ok(())
+}
+
+/// Realistic multi-hop / impact-analysis queries.
+fn graph_workload_queries() -> Vec<String> {
+    vec![
+        "impact of changing BAPI_ACC_DOCUMENT_POST".into(),
+        "where is FAGLFLEXA used".into(),
+        "callers of ZFIN_POST_JE".into(),
+        "downstream from ZIF_FIN_POSTABLE".into(),
+        "trace from period_close to LeanIX applications".into(),
+        "what depends on table T001B".into(),
+        "objects that touch goods movement".into(),
+        "what does the O2C process call".into(),
+        "from ZMM_GRN_CHECK to material master".into(),
+        "S/4HANA Finance dependencies".into(),
+    ]
 }
 
 /// A mix of realistic intent queries spanning the four corpus domains.

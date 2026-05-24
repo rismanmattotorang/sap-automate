@@ -27,6 +27,8 @@ use clap::Parser;
 use mcp_server::Server;
 use mcp_transport::{HttpServerConfig, HttpServerTransport, StdioTransport};
 use sap_automate_adt::{AdtClient, AdtDestination, MockAdtClient};
+use sap_automate_graph::InMemoryGraph;
+use sap_automate_rag::GraphEngine;
 use sap_automate_skills::SkillRegistry;
 use sap_automate_ingest::{EmbeddingClient, MockEmbedder};
 use sap_automate_kb::{InMemoryKb, KnowledgeStore};
@@ -105,6 +107,16 @@ async fn main() -> anyhow::Result<()> {
             .with_reranker(Arc::new(sap_automate_rag::MockReranker::new()))
     );
 
+    // Phase 5A: cross-domain knowledge graph + GraphRAG/HippoRAG/RAPTOR.
+    let kg = Arc::new(InMemoryGraph::with_demo_corpus());
+    let graph_engine = Arc::new(GraphEngine::new(kg));
+    tracing::info!(
+        nodes = graph_engine.graph.stats().node_count,
+        edges = graph_engine.graph.stats().edge_count,
+        communities = graph_engine.communities.communities.len(),
+        "graph engine ready"
+    );
+
     // Build the SAP client.  Credentials are layered (env first, static
     // fallback for the offline demo).
     let creds_provider = LayeredCredentialProvider::new()
@@ -147,6 +159,7 @@ async fn main() -> anyhow::Result<()> {
 
     let ctx = Arc::new(ServerContext {
         rag,
+        graph: graph_engine,
         embedder,
         sap_client,
         adt_client,
@@ -208,6 +221,9 @@ fn build_server(ctx: Arc<ServerContext>, agents_md: &Option<String>, read_only: 
     // ADT tools (Phase 2 finalisation — informed by mario-andreschak +
     // fr0ster/mcp-abap-adt).
     for desc in tools::adt_tools(&ctx) { builder = builder.tool(desc); }
+
+    // Graph tools (Phase 5A — GraphRAG + HippoRAG + RAPTOR).
+    for desc in tools::graph_tools(&ctx) { builder = builder.tool(desc); }
 
     // Resources.
     for desc in resources::all(&ctx) { builder = builder.resource(desc); }

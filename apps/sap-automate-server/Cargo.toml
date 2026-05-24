@@ -19,6 +19,7 @@ sap-automate-ingest = { workspace = true }
 sap-automate-rfc = { workspace = true }
 sap-automate-adt = { workspace = true }
 sap-automate-skills = { workspace = true }
+sap-automate-graph = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
