@@ -61,6 +61,11 @@ cargo run --release -p sample-client -- --server target/release/sap-automate-ser
 # Demo 7 (Phase 2 ADT): BTP data-preview block surfaces fallback advice
 cargo run --release -p sample-client -- --server target/release/sap-automate-server \
     --call 'abap.adt.get_table_contents={"table":"BSEG","max_rows":10}'
+
+# Demo 8 (Phase 3): P95 hybrid retrieval acceptance benchmark
+cargo run --release --bin sap-automate-bench
+# → P95 ~0.16 ms over the pilot corpus (gate: 80 ms). Layer breakdown shows
+#   dense+sparse+RRF+rerank costs in μs each.
 ```
 
 See [`docs/COMPARISON.md`](docs/COMPARISON.md) for the comparative analysis

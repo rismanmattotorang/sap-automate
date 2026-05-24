@@ -14,11 +14,20 @@ pub struct ChunkerConfig {
     pub target_chars: usize,
     /// Overlap between adjacent chunks, in characters.
     pub overlap_chars: usize,
+    /// Anthropic-style contextual enrichment (paper §VII-D, §X-E).  When
+    /// enabled, the chunker prepends a 2–3 sentence summary of the parent
+    /// document to every chunk before embedding.  This is the single
+    /// largest precision lift the paper attributes to a chunking change.
+    pub contextual_enrichment: bool,
 }
 
 impl Default for ChunkerConfig {
     fn default() -> Self {
-        Self { target_chars: 1600, overlap_chars: 200 }
+        Self {
+            target_chars: 1600,
+            overlap_chars: 200,
+            contextual_enrichment: true,
+        }
     }
 }
 
@@ -30,7 +39,12 @@ pub fn chunk_document(doc: &Document, cfg: &ChunkerConfig) -> Vec<Chunk> {
     } else {
         format!("{} > ", doc.breadcrumbs.join(" > "))
     };
-    let prefix = format!("{}{}\n", breadcrumb, doc.title);
+    let context = if cfg.contextual_enrichment {
+        format!("Context: {}\n", document_context(doc))
+    } else {
+        String::new()
+    };
+    let prefix = format!("{}{}{}\n", breadcrumb, doc.title, if context.is_empty() { "".to_string() } else { format!("\n{context}") });
 
     let body = doc.body.trim();
     if body.is_empty() {
@@ -108,6 +122,25 @@ fn find_sentence_end(bytes: &[u8], from: usize, to: usize) -> Option<usize> {
         i -= 1;
     }
     None
+}
+
+/// Compose a 2–3 sentence document context.  For the in-process pipeline
+/// we use an extractive heuristic — the first 280 characters or the first
+/// sentence pair, whichever ends sooner.  When a real LLM is wired in
+/// (Phase 3A finalisation, paper §VII-D) this becomes one prompt-cached
+/// call per document.
+fn document_context(doc: &sap_automate_kb::Document) -> String {
+    let body = doc.body.trim();
+    if body.is_empty() { return doc.title.clone(); }
+    // Extract up to two sentences worth of content.
+    let mut out = String::new();
+    let mut sentence_count = 0;
+    for ch in body.chars() {
+        out.push(ch);
+        if matches!(ch, '.' | '!' | '?') { sentence_count += 1; }
+        if sentence_count >= 2 || out.len() >= 280 { break; }
+    }
+    out.trim().to_string()
 }
 
 fn find_space(bytes: &[u8], to: usize) -> Option<usize> {

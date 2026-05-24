@@ -15,6 +15,7 @@ members = [
     "crates/sap-automate-adt",
     "apps/sap-automate-server",
     "apps/sap-automate-ingest",
+    "apps/sap-automate-bench",
     "apps/sample-server",
     "apps/sample-client",
 ]

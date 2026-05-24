@@ -15,7 +15,7 @@ pub mod qdrant;
 pub use schema::{
     Chunk, ChunkId, Document, DocumentId, Domain, content_hash,
 };
-pub use store::{InMemoryKb, KnowledgeStore, SearchHit, SearchQuery, StoreError, UpsertBatch};
+pub use store::{InMemoryKb, KnowledgeStore, Layer, SearchHit, SearchQuery, StoreError, UpsertBatch};
 
 #[cfg(feature = "qdrant")]
 pub use qdrant::QdrantStore;

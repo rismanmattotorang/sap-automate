@@ -85,7 +85,10 @@ async fn main() -> anyhow::Result<()> {
     let store: Arc<dyn KnowledgeStore> = Arc::new(InMemoryKb::new());
     let embedder: Arc<dyn EmbeddingClient> = Arc::new(MockEmbedder::new(cli.embedding_dim));
     seed::populate_with_embeddings(&store, embedder.as_ref()).await?;
-    let rag = Arc::new(RagEngine::new(store.clone()));
+    let rag = Arc::new(
+        RagEngine::new(store.clone())
+            .with_reranker(Arc::new(sap_automate_rag::MockReranker::new()))
+    );
 
     // Build the SAP client.  Credentials are layered (env first, static
     // fallback for the offline demo).

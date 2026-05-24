@@ -1473,6 +1473,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "sap-automate-bench"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "sap-automate-ingest",
+ "sap-automate-kb",
+ "sap-automate-rag",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "sap-automate-connectors"
 version = "0.1.0"
 dependencies = [
@@ -1546,6 +1561,7 @@ dependencies = [
  "sap-automate-kb",
  "serde",
  "serde_json",
+ "tokio",
  "tracing",
 ]
 
