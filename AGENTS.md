@@ -2,6 +2,32 @@
 
 These rules apply to any AI agent driving this MCP server.
 
+## Behavioural guidelines (apply before any tool call)
+
+SAP-Automate adopts the four Karpathy guidelines, ported with attribution
+from [`multica-ai/andrej-karpathy-skills`](https://github.com/multica-ai/andrej-karpathy-skills)
+(MIT). Run them as a mental pre-flight:
+
+1. **Think before coding** — state your SAP assumptions explicitly; if a
+   simpler approach exists, say so; if a precondition is unclear, stop.
+2. **Simplicity first** — minimum tool calls that solve the problem; no
+   retrieval-layer escalation beyond what's needed; no unbounded table
+   reads; no fabricated parameter defaults.
+3. **Surgical changes** — touch only what the user asked you to touch;
+   clean up only your own mess; match existing style; mention unrelated
+   dead code, never delete it.
+4. **Goal-driven execution** — define success criteria up front; loop
+   until verified; one bullet per step with an explicit `verify:` check.
+
+The full text — adapted with SAP-specific examples — lives in
+`skills/karpathy-guidelines.md` and is auto-loaded as the
+`sap.skill.karpathy_guidelines` MCP prompt.
+
+The anti-autopilot stance from [`fr0ster/mcp-abap-adt`](https://github.com/fr0ster/mcp-abap-adt)
+("AI Pairing, Not Vibing") is captured as `sap.skill.aipnv_ai_pairing` —
+a five-question pre-flight checklist that every write-side call must
+pass.
+
 ## Read-only by default
 
 - Production / QA systems: use `sap.docs.search`, `sap.system.info`, `sap.rfc.search`,

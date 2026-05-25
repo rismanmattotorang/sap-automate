@@ -146,6 +146,16 @@ export default function SkillLab() {
                     auto-loads them and exposes them via MCP <code>prompts/get</code>.
                     No protocol extension required.
                   </p>
+                  <p>
+                    <b>Behavioural skills</b> ride the same surface.
+                    {' '}<code>sap.skill.karpathy_guidelines</code> (ported from {' '}
+                    <code>multica-ai/andrej-karpathy-skills</code>, MIT)
+                    captures the four pre-flight principles — think-before, simplicity, surgical
+                    changes, goal-driven execution — and {' '}
+                    <code>sap.skill.aipnv_ai_pairing</code> the five-question anti-autopilot
+                    checklist from <code>fr0ster/mcp-abap-adt</code>. The gateway routes user
+                    intents directly to these skills via <code>prompts/get</code>.
+                  </p>
                 </div>
               </Card>
             </>

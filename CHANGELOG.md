@@ -6,6 +6,186 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [Unreleased]
+
+A targeted convergence pass after surveying
+[`multica-ai/andrej-karpathy-skills`](https://github.com/multica-ai/andrej-karpathy-skills)
+and re-reading the six reference SAP MCP servers tracked in
+`docs/COMPARISON.md`. Follows the Karpathy
+"Simplicity First / Surgical Changes" discipline — additive only,
+no rewrites.
+
+### KB + RAG pass (2026-05-25 — same release window)
+
+Third pass: extends the knowledge / retrieval layer with the convergent
+patterns from [`VectifyAI/OpenKB`](https://github.com/VectifyAI/OpenKB) +
+[`VectifyAI/PageIndex`](https://github.com/VectifyAI/PageIndex) (hierarchical
+document tree) and [`unclecode/crawl4ai`](https://github.com/unclecode/crawl4ai)
+(robots.txt, rate-limit, "fit markdown" boilerplate filter), plus
+retrieval transparency that operators have been asking for.
+
+#### Knowledge base (`crates/sap-automate-kb`)
+
+- **`doc_tree::DocumentTree`** — deterministic hierarchical tree built
+  from a document's headings (Markdown ATX `#`/`##`/`###`, numbered
+  sections like `1.2.3.`, or `SECTION:` keyword markers). Each node
+  carries title, extractive 2-sentence summary, byte range, approx token
+  count, and children. The OpenKB + PageIndex *data structure* without
+  the LLM-at-build-time dependency.
+- **`KnowledgeStore::get_document_tree(id)`** — default-impl trait
+  method using the new builder. Production backends can override to
+  cache the tree alongside the document.
+- **Content-hash dedup** at chunk upsert: writing the same `(chunk_id, text)`
+  twice is a no-op, surfaced via `UpsertStats::chunks_dedup_skipped`.
+  Pre-empts a real foot-gun where a re-crawl with unchanged content was
+  rewriting the same rows.
+
+#### RAG (`crates/sap-automate-rag`)
+
+- **`RetrievalDiagnostics`** field on `SearchResponse`: dense / sparse
+  candidate counts, RRF overlap (consensus signal), tokenised query
+  terms (so the operator sees *what* BM25 actually searched for),
+  reranker-ran flag, truncated-by-top-k flag. Pure additive; ordering
+  unchanged.
+- `RagEngine::store()` accessor so tools can reach the underlying
+  `KnowledgeStore` without re-plumbing.
+
+#### Server (`apps/sap-automate-server`)
+
+- **`sap.kb.navigate`** MCP tool — walks the document tree by dotted
+  path (`"1.2.1"`) with a bounded `depth`. Convergent OpenKB +
+  PageIndex pattern: for long SAP Help pages and ABAP source files,
+  section-by-section navigation beats similarity-blind retrieval.
+- 4 in-process binary integration tests under
+  `tests/kb_navigate.rs` covering registration, root walk, dotted-path
+  navigation, and missing-doc error path.
+
+#### Crawler (`crates/sap-automate-ingest`)
+
+- **`robots::RobotsTxt`** — RFC 9309-subset parser with
+  most-specific-agent matching, longest-prefix Allow/Disallow,
+  `Crawl-delay:` extraction. 7 unit tests.
+- **`rate_limit::RateLimiter`** — per-host token-bucket spacing,
+  default plus per-host overrides from `Crawl-delay:`. 5 unit tests.
+- **`fit_markdown::fit_markdown_filter`** — Crawl4AI's BM25-based
+  block-level content filter. Scores paragraphs against a topic
+  (typically the page title), drops nav/footer/cookie-banner
+  boilerplate while always keeping long blocks. Returns `FitStats`
+  (retention ratios). 4 unit tests.
+
+### Apps-layer pass (2026-05-25 — same release window)
+
+Closes the loop on the metadata-cache work above by wiring it through
+every app surface, verifying it end-to-end with binary integration
+tests, and exposing it to operators (TUI + web).
+
+#### Server (`apps/sap-automate-server`)
+
+- **Wires `MetadataCache`** as a decorator over `MockSapClient` (also
+  ready for any future `NetweaverSapClient`). New CLI flag
+  `--metadata-cache-ttl-secs` (default `300`; `0` makes the cache a
+  pass-through counter so operators still get hit/miss visibility).
+- **`sap.system.cache_stats`** MCP tool — read-only, returns
+  `{ enabled, hits, misses, entries, evictions, hit_ratio }`.
+  Convergent with `thupalo/sap-rfc-mcp-server`'s
+  `get_metadata_cache_stats`.
+- **`sap.system.cache_invalidate`** MCP tool — operator escape hatch
+  for the case where an upstream transport import changed an RFC
+  signature and cached metadata is stale. Mutates only local state,
+  never SAP.
+- **`sap-cache://stats`** MCP resource — same JSON, surfaced through
+  `resources/read`.
+- **3 binary integration tests** (`apps/sap-automate-server/tests/cache_tools.rs`)
+  spawn the compiled server, list tools/resources, call
+  `sap.rfc.metadata` twice, and verify the hit counter moves —
+  Karpathy goal-driven verify loop.
+
+#### TUI (`apps/sap-automate-tui`)
+
+- New `TrafficEvent::CacheStat` variant + `CacheSnapshot` in the
+  state machine.
+- **Cache row** at the bottom of the KB tab (hits / misses /
+  entries / hit_ratio) with the same green/yellow/red threshold
+  styling as the other gauges.
+- Synthetic feed emits a cache snapshot every 23 ticks so the row is
+  exercised offline.
+
+#### Gateway (`apps/sap-automate-gw`)
+
+- **Skill-aware routing** — `match_skill()` maps user-intent keywords
+  to `sap.skill.*` prompts and invokes them via `prompts/get` before
+  falling back to raw tool calls. Honours the convergent
+  `marianfoo/sap-ai-mcp-servers` insight that *agents should invoke
+  skills, not raw tools*. Eight intents routed: SoD audit, BW
+  migration, period close, ABAP code review, OData design, transport
+  impact, Clean Core audit, Karpathy guidelines pre-flight.
+
+#### Web (`apps/web`)
+
+- **Cache panel on the Operations page** — polls
+  `sap.system.cache_stats` every 2 s, renders hits / misses /
+  entries / evictions in stat tiles + a hit-ratio progress bar
+  (green ≥80%, yellow ≥50%, red <50%).
+- **Skill Lab "Why this matters"** updated to credit the Karpathy
+  convergence alongside `mdk-mcp-server` / `fr0ster/mcp-abap-adt` /
+  `marianfoo/sap-ai-mcp-servers`.
+
+### Added
+
+- **`skills/karpathy-guidelines.md`** — port of Multica's
+  `karpathy-guidelines` SKILL (MIT, attributed) adapted with SAP-specific
+  examples. Loaded by `SkillRegistry` as the
+  `sap.skill.karpathy_guidelines` MCP prompt.
+- **`skills/aipnv-ai-pairing.md`** — AIPNV anti-autopilot five-question
+  checklist that surfaces the `fr0ster/mcp-abap-adt` stance as an
+  invokable pre-flight skill.
+- **`skills/odata-service-design.md`** — generic OData-proxy design
+  discipline (metadata-first → tool-surface mapping → EDM-to-JSON-Schema
+  conversion → auth binding → exposure policy → verification gates).
+  Convergent pattern from `marianfoo/sap-ai-mcp-servers`.
+- **`skills/security-sod-audit.md`** — read-only Segregation-of-Duties
+  audit walking `USR02` / `AGR_USERS` / `AGR_1251` / `AGR_TCODES` /
+  `RFCDES`; bundled SoD rule library for FI/MM/SD/basis conflict pairs.
+- **`skills/bw-to-datasphere-migration.md`** — BW modernisation
+  classification matrix + custom-code surfacing + 3-wave plan + risk
+  register.
+- **`sap-automate-rfc::MetadataCache`** — TTL-keyed decorator over any
+  `SapClient`. Implements the `thupalo/sap-rfc-mcp-server` pattern:
+  caches `RfcFunctionMeta` by `(function, language)`, splits bulk reads
+  into hits + misses, exposes `CacheStats` for Prometheus, supports
+  `invalidate_all()` for system-role flips.  `tokio::sync::RwLock`-based,
+  no extra dependencies.  6 unit tests cover hit/miss, TTL=0 disable,
+  TTL expiry, bulk-split, invalidation, and `(function, language)`
+  keying.
+- **Behavioural-guidelines section in `AGENTS.md`** — restates the four
+  Karpathy principles as pre-flight rules; cross-links the new skills.
+
+### Changed
+
+- Skill count: **8 → 13** auto-discovered skills.
+- MCP tool count: **32 → 35** (cache_stats, cache_invalidate, kb.navigate).
+- MCP resource count: **11 → 12** (`sap-cache://stats`).
+- MCP prompts surfaced via `prompts/list`: **11 → 16**.
+- Test count: **104 → 145** passing tests (+6 metadata_cache +3 cache-tools +6 doc_tree +3 store-dedup/tree +2 RAG-diagnostics +7 robots +5 rate-limit +4 fit-markdown +4 kb_navigate +1 misc).
+- `README.md` — refreshed credits, added skill table, repository-layout
+  blurb; added `MetadataCache (TTL)` mention in `sap-automate-rfc`
+  description; bumped tool / resource counts; credited OpenKB+PageIndex
+  and Crawl4AI as the references for the KB+RAG+crawler pass.
+
+### Notes
+
+- Nothing in this release is breaking. Public API of `sap-automate-rfc`
+  gains a `metadata_cache` module and re-exports `MetadataCache` +
+  `CacheStats`; the trait signature of `SapClient` is unchanged.
+- No new external dependencies.  The cache uses `tokio::sync::RwLock`,
+  `std::time::Instant`, and the existing `async-trait` already in
+  workspace.
+- The 5 new skills carry valid YAML-style frontmatter and round-trip
+  through `parse_skill_file()`; tests in `sap-automate-skills` validate
+  the loader unchanged.
+
+---
+
 ## [1.0.0] — 2026-05-25  ·  First public release
 
 The first general-availability release of **SAP-Automate** — a

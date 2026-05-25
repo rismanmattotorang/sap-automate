@@ -43,10 +43,51 @@ pub fn all(ctx: &Arc<ServerContext>) -> Vec<ResourceDescriptor> {
 
     out.push(make_adt_destination(ctx));
 
+    if ctx.metadata_cache.is_some() {
+        out.push(make_cache_stats(ctx));
+    }
+
     if ctx.agents_md.is_some() {
         out.push(make_agents_md(ctx));
     }
     out
+}
+
+fn make_cache_stats(ctx: &Arc<ServerContext>) -> ResourceDescriptor {
+    struct H(Arc<ServerContext>);
+    impl ResourceHandler for H {
+        fn read(&self, uri: &str) -> Pin<Box<dyn Future<Output = mcp_core::Result<ReadResourceResult>> + Send + '_>> {
+            let uri = uri.to_string();
+            let ctx = Arc::clone(&self.0);
+            Box::pin(async move {
+                let cache = ctx.metadata_cache.as_ref()
+                    .ok_or_else(|| Error::Other("metadata cache disabled".into()))?;
+                let s = cache.stats().await;
+                let text = serde_json::to_string_pretty(&serde_json::json!({
+                    "hits": s.hits,
+                    "misses": s.misses,
+                    "entries": s.entries,
+                    "evictions": s.evictions,
+                    "hit_ratio": s.hit_ratio(),
+                })).map_err(Error::Json)?;
+                Ok(ReadResourceResult {
+                    contents: vec![ResourceContents {
+                        uri, mime_type: Some("application/json".into()),
+                        text: Some(text), blob: None,
+                    }],
+                })
+            })
+        }
+    }
+    ResourceDescriptor {
+        resource: Resource {
+            uri: "sap-cache://stats".into(),
+            name: "RFC metadata cache stats".into(),
+            description: Some("Live hit/miss counters for the RFC metadata cache (thupalo/sap-rfc-mcp-server pattern). JSON.".into()),
+            mime_type: Some("application/json".into()),
+        },
+        handler: Arc::new(H(Arc::clone(ctx))),
+    }
 }
 
 fn make_adt_destination(ctx: &Arc<ServerContext>) -> ResourceDescriptor {

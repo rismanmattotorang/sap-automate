@@ -18,6 +18,9 @@ pub use graph_layer::{
     RaptorSummaryResponse, RaptorView,
 };
 
+// `RetrievalDiagnostics` is exposed from this crate so the MCP server
+// can include it in `sap.docs.search` responses.
+
 use sap_automate_kb::{Domain, KnowledgeStore, SearchHit, SearchQuery};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -52,11 +55,40 @@ pub struct LatencyBreakdown {
     pub total_us: u64,
 }
 
+/// Per-query retrieval diagnostics.  Surfaces *why* the engine picked what
+/// it picked — invaluable for SAP queries where exact transaction codes,
+/// BAPI names, and table identifiers matter as much as semantic similarity.
+///
+/// Pure additive: the existing `hits` ordering is unchanged.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RetrievalDiagnostics {
+    /// Number of dense candidates returned before fusion.
+    pub dense_candidates: usize,
+    /// Number of sparse (BM25) candidates returned before fusion.
+    pub sparse_candidates: usize,
+    /// How many chunks appear in both the dense and sparse rankings.
+    /// High overlap → RRF is rewarding consensus.  Low overlap → either
+    /// the corpus or the query is one-sided (often signals an
+    /// identifier-only query that BM25 nails but dense misses).
+    pub rrf_overlap: usize,
+    /// Query terms that were *tokenised* — the actual signal BM25 saw,
+    /// after the SAP-identifier-preserving tokenizer.  Surfacing this
+    /// lets the agent / operator immediately see whether a typo or a
+    /// stop-word ate the search.
+    pub query_terms: Vec<String>,
+    /// Whether the reranker ran.
+    pub reranked: bool,
+    /// Did the result set get clipped by `top_k`?
+    pub truncated: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResponse {
     pub hits: Vec<HitView>,
     pub layer: Layer,
     pub latency: LatencyBreakdown,
+    #[serde(default)]
+    pub diagnostics: RetrievalDiagnostics,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,6 +133,13 @@ pub struct RagEngine {
 impl RagEngine {
     pub fn new(store: Arc<dyn KnowledgeStore>) -> Self {
         Self { store, reranker: None, rrf_k: 60.0, candidate_pool: 40 }
+    }
+
+    /// Borrowed handle to the underlying `KnowledgeStore`.  Used by tools
+    /// that need to step outside the RAG abstraction (e.g. document-tree
+    /// navigation).
+    pub fn store(&self) -> &Arc<dyn KnowledgeStore> {
+        &self.store
     }
 
     pub fn with_reranker(mut self, reranker: Arc<dyn Reranker>) -> Self {
@@ -165,6 +204,7 @@ impl RagEngine {
         let fusion_start = Instant::now();
         let fused = reciprocal_rank_fusion(&dense, &sparse, self.rrf_k, self.candidate_pool);
         let fusion_us = fusion_start.elapsed().as_micros() as u64;
+        let rrf_overlap = rank_overlap(&dense, &sparse);
 
         // --- rerank --------------------------------------------------------
         let rerank_start = Instant::now();
@@ -194,6 +234,7 @@ impl RagEngine {
         let rerank_us = rerank_start.elapsed().as_micros() as u64;
 
         // --- pack response -------------------------------------------------
+        let truncated = reranked.len() > query.top_k;
         let mut top = reranked;
         top.truncate(query.top_k);
         let response = SearchResponse {
@@ -203,9 +244,45 @@ impl RagEngine {
                 dense_us, sparse_us, fusion_us, rerank_us,
                 total_us: total_start.elapsed().as_micros() as u64,
             },
+            diagnostics: RetrievalDiagnostics {
+                dense_candidates: dense.len(),
+                sparse_candidates: sparse.len(),
+                rrf_overlap,
+                query_terms: tokenize_query(query.text),
+                reranked: self.reranker.is_some(),
+                truncated,
+            },
         };
         Ok(response)
     }
+}
+
+/// Count chunks that appear in both rankings — RRF rewards these.
+fn rank_overlap(dense: &[SearchHit], sparse: &[SearchHit]) -> usize {
+    use std::collections::HashSet;
+    if dense.is_empty() || sparse.is_empty() {
+        return 0;
+    }
+    let dense_ids: HashSet<&str> = dense.iter().map(|h| h.chunk.id.as_str()).collect();
+    sparse.iter().filter(|h| dense_ids.contains(h.chunk.id.as_str())).count()
+}
+
+/// Same tokeniser the BM25 path uses inside the store, lifted here so the
+/// diagnostics surface the exact terms the BM25 scorer saw.  Lowercase,
+/// alphanumeric-or-underscore runs of length ≥ 2.
+fn tokenize_query(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    for ch in text.chars() {
+        if ch.is_alphanumeric() || ch == '_' {
+            current.push(ch.to_ascii_lowercase());
+        } else if !current.is_empty() {
+            if current.len() >= 2 { out.push(std::mem::take(&mut current)); }
+            else { current.clear(); }
+        }
+    }
+    if current.len() >= 2 { out.push(current); }
+    out
 }
 
 /// Reciprocal Rank Fusion.  For each hit appearing in either ranking the
@@ -274,5 +351,23 @@ mod tests {
         let top_ids: Vec<_> = fused.iter().take(2).map(|h| h.chunk.id.clone()).collect();
         assert!(top_ids.contains(&"a".to_string()) && top_ids.contains(&"c".to_string()),
             "expected a + c at top; got {top_ids:?}");
+    }
+
+    #[test]
+    fn rank_overlap_counts_consensus_pairs() {
+        let dense = vec![mk("a", "", 1.0), mk("b", "", 1.0), mk("c", "", 1.0)];
+        let sparse = vec![mk("a", "", 1.0), mk("c", "", 1.0), mk("d", "", 1.0)];
+        assert_eq!(rank_overlap(&dense, &sparse), 2); // a and c
+        assert_eq!(rank_overlap(&dense, &[]), 0);
+        assert_eq!(rank_overlap(&[], &sparse), 0);
+    }
+
+    #[test]
+    fn tokenize_query_preserves_sap_identifiers() {
+        let t = tokenize_query("BAPI_ACC_DOCUMENT_POST and the period close");
+        // BAPI identifier survives intact, joined by underscores.
+        assert!(t.iter().any(|x| x == "bapi_acc_document_post"));
+        // Stop-word-shaped single chars are dropped (need ≥ 2 chars).
+        assert!(t.iter().all(|x| x.len() >= 2));
     }
 }

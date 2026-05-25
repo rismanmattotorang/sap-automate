@@ -15,6 +15,10 @@ that follow from them.
 | **`mario-andreschak/mcp-abap-adt`** | github.com/mario-andreschak/mcp-abap-adt | TypeScript, 13 read-only ADT tools |
 | **`fr0ster/mcp-abap-adt`** | github.com/fr0ster/mcp-abap-adt | TypeScript, 60+ tools, full CRUD, RAP-first, multi-transport, "AI Pairing, Not Vibing" |
 | **`marianfoo/sap-ai-mcp-servers`** | github.com/marianfoo/sap-ai-mcp-servers | Meta-registry of 40+ SAP MCP servers, skills, and Claude plugins |
+| **`multica-ai/andrej-karpathy-skills`** | github.com/multica-ai/andrej-karpathy-skills | Skill repository — behavioural guidelines (MIT) distilled from Andrej Karpathy's observations on LLM coding pitfalls |
+| **`VectifyAI/OpenKB`** | github.com/VectifyAI/OpenKB | Compile-time knowledge-base engine — long docs become navigable wikis; uses PageIndex internally |
+| **`VectifyAI/PageIndex`** | github.com/VectifyAI/PageIndex | Vectorless hierarchical document indexer — table-of-contents-shaped tree from a long doc; AlphaGo-inspired tree-search retrieval |
+| **`unclecode/crawl4ai`** | github.com/unclecode/crawl4ai | LLM-friendly Python crawler — robots respect, JS rendering, "fit markdown" BM25 boilerplate filter, BFS/DFS/Best-First deep crawl |
 | SAP Community blog #1 (ABAP add-on for ECC/S4) | community.sap.com | ABAP add-on |
 | SAP Community blog #2 (Mobile MCP) | community.sap.com | SAP announcement, MDK |
 
@@ -114,6 +118,79 @@ that follow from them.
 - **Knowledge-driven decision-making**: documentation MCP servers
   (SAP Docs MCP, SAP Notes MCP) inform agent choices before execution.
 
+### `VectifyAI/OpenKB` + `VectifyAI/PageIndex`
+
+- **OpenKB**'s thesis: *knowledge compounds over time instead of being
+  re-derived on every query*. Long documents are compiled into a
+  persistent wiki with per-document summaries, cross-document concept
+  pages, and an updated index — rather than re-discovered at every
+  retrieval.
+- **PageIndex** is OpenKB's long-document indexer.  It builds a
+  table-of-contents-shaped tree (title, summary, page-range,
+  children) and treats retrieval as LLM-driven *tree search* —
+  AlphaGo-inspired navigation, not vector similarity.  Claimed
+  98.7% accuracy on FinanceBench via Mafin 2.5.
+- **Insight for us**: the *data structure* is decoupled from the
+  retrieval policy.  The tree is deterministic; the navigation
+  reasoning lives in the agent.  Adopt the tree (pure Rust,
+  zero LLM dependency at build time); leave the navigation to the
+  agent through an MCP tool.
+- **Design move**: `sap_automate_kb::doc_tree::DocumentTree` builds
+  the tree from Markdown ATX headings / numbered sections / `SECTION:`
+  markers in any `Document::body`.  `KnowledgeStore::get_document_tree`
+  default-impl exposes it.  The `sap.kb.navigate` MCP tool walks it
+  by dotted path with a bounded depth, so an agent can ask for
+  "Period-End Close > Foreign Currency Revaluation > Posting Logic"
+  directly instead of doing similarity-blind retrieval.
+
+### `unclecode/crawl4ai`
+
+- **LLM-friendly Python crawler** with three productionised patterns
+  every real crawl needs but most demo crawlers skip:
+  1. **Robots respect** — most-specific-agent matching, `Crawl-delay:`.
+  2. **Stealth / rate-limiting** — per-host pacing so the source
+     doesn't IP-block the crawler.
+  3. **"Fit markdown" content filter** — BM25 scores every block
+     against the page topic, drops nav / footer / cookie-banner
+     boilerplate while keeping the substantive content.  This is
+     the single largest *signal-to-noise* lift an HTML crawler can
+     ship without an LLM call.
+- **Insight for us**: the SAP Help Portal is well-behaved, but
+  production crawls against Signavio, LeanIX, and customer help
+  exports will absolutely need rate-limiting + robots-respect to
+  avoid blowing past the source's quota.
+- **Design move**: three small pure-Rust modules in
+  `sap_automate_ingest` — `robots::RobotsTxt` (RFC 9309 subset),
+  `rate_limit::RateLimiter` (token-bucket per host), and
+  `fit_markdown::fit_markdown_filter` (BM25 block filter).  No new
+  dependencies.  Each has its own unit-test suite.
+
+### `multica-ai/andrej-karpathy-skills`
+
+- **Single-file behavioural skill** (`skills/karpathy-guidelines/SKILL.md`,
+  MIT-licensed) distilling four principles from
+  [Karpathy's observations](https://x.com/karpathy/status/2015883857489522876)
+  on LLM coding pitfalls:
+  1. **Think before coding** — surface assumptions; don't silently pick
+     one of multiple interpretations.
+  2. **Simplicity first** — minimum code; no speculative abstractions;
+     no error handling for impossible cases.
+  3. **Surgical changes** — touch only what the request demands; match
+     existing style; orphan only what your change orphaned.
+  4. **Goal-driven execution** — transform tasks into verifiable
+     success criteria; loop independently.
+- **Insight for us**: the *form* of a behavioural skill — frontmatter +
+  numbered principles + acceptance checklist — slots cleanly into
+  SAP-Automate's existing `SkillRegistry` without any change to the
+  loader. The principles themselves are a force-multiplier on top of
+  AGENTS.md guardrails (which constrain *what* the agent may call) by
+  constraining *how* it should reason before any call.
+- **Design move**: port the skill verbatim in spirit, with SAP-specific
+  examples in each principle (period close, BAPI selection,
+  read-only-by-default retrieval-layer escalation). Land it as
+  `skills/karpathy-guidelines.md` and surface it in `AGENTS.md` as the
+  default pre-flight.
+
 ### "Developing Mobile Apps with AI Agents" blog (SAP, official)
 
 - **AI-agent-first design**: tools designed for agent decision-making,
@@ -150,7 +227,16 @@ that follow from them.
 | **AI-pairing-not-vibing safety stance** | fr0ster | **Multiple lines of defence**: exposure policy + per-call `read_only` flag + per-RFC `read_only` metadata + AGENTS.md guardrails surfaced in handshake + structured error codes |
 | **Operator TUI** | mostly absent in references | **5-tab Ratatui TUI** (Sessions / Tools / KB / RAG / Logs) with live LatencyBreakdown gauge against the 80 ms budget, per-tool P50/P95/P99, KB staleness, structured log tail. Connects via admin endpoint or local synthetic feed for offline ops drills |
 | **Web UI** | mostly absent (CData ships a minimal management UI; SAP Joule is proprietary; the marianfoo registry catalogues 40+ servers but only one mentions a "web management interface") | **Next.js 14 App Router** with 5 routes that speak MCP 2025-06-18 directly via HTTP+JSON-RPC through a same-origin proxy. **Query Lab** shows ranked results with citation chips colour-coded by URI scheme — no other open-source SAP MCP has this. **Tool Explorer** auto-generates forms from each tool's JSON Schema and surfaces the read-only/write flag. **Skill Lab** live-renders any prompt with argument substitution as you type. **Resources** browser groups by URI scheme. **Operations** dashboard mirrors the TUI with a live latency-budget gauge against the 80 ms gate |
-| **Skills layer** | mdk + fr0ster + marianfoo | **`SkillRegistry` auto-discovers markdown skills** from `./skills/`, `./.sap-automate/skills/`, `~/.config/sap-automate/skills/`. Each skill = one MCP prompt. Frontmatter declares required tools (validated at registry time), arguments, tags. 5 starter skills shipped: `sap.skill.period_close_investigation`, `sap.skill.transport_impact_analysis`, `sap.skill.rap_service_scaffolding`, `sap.skill.clean_core_audit`, `sap.skill.abap_code_review` |
+| **Skills layer** | mdk + fr0ster + marianfoo | **`SkillRegistry` auto-discovers markdown skills** from `./skills/`, `./.sap-automate/skills/`, `~/.config/sap-automate/skills/`. Each skill = one MCP prompt. Frontmatter declares required tools (validated at registry time), arguments, tags. **13 skills shipped**: 8 SAP-domain (period_close_investigation, transport_impact_analysis, rap_service_scaffolding, clean_core_audit, abap_code_review, po_creation_elicit, customer_master_elicit, transport_release_elicit) + 5 behavioural / design (karpathy_guidelines, aipnv_ai_pairing, odata_service_design, security_sod_audit, bw_to_datasphere_migration). |
+| **Behavioural pre-flight** | absent across all references | **`sap.skill.karpathy_guidelines`** ported from [`multica-ai/andrej-karpathy-skills`](https://github.com/multica-ai/andrej-karpathy-skills) (MIT) with SAP-specific examples. Surfaced in `AGENTS.md`. Slots into the existing `SkillRegistry` with zero loader changes. |
+| **RFC metadata cache** | thupalo: file-based, persistent, compressed; ~1–5 ms cached vs ~200–500 ms direct | **`MetadataCache<C: SapClient>` decorator** in `sap-automate-rfc`: TTL-keyed `(function, language)` cache over any `SapClient`. Bulk reads split into hits + misses so only misses hit the SAP system. `CacheStats` surfaced for Prometheus. `invalidate_all()` for system-role flips. No extra deps (`tokio::sync::RwLock`). **Wired through `apps/sap-automate-server` with `--metadata-cache-ttl-secs` (default 300)**, exposed as `sap-cache://stats` resource + `sap.system.cache_stats` / `sap.system.cache_invalidate` MCP tools (thupalo's `get_metadata_cache_stats` convergence), surfaced live in the TUI KB tab and the web Operations page. 3 server-binary integration tests verify the hit counter moves on repeat calls. Persistence + compression deferred behind the trait. |
+| **Skill-aware gateway routing** | marianfoo registry: "agents invoke skills, not raw tools" | **`apps/sap-automate-gw::match_skill()`** maps user-intent keywords to `sap.skill.*` prompts and invokes them via `prompts/get` before falling back to raw tool calls. 8 intents routed: SoD audit, BW migration, period close, ABAP code review, OData design, transport impact, Clean Core audit, Karpathy guidelines. Keyword router today; LLM-driven router in v1.5 without changing the channel/tool trait surface. |
+| **Hierarchical document tree** | OpenKB + PageIndex: tree-of-contents data structure + LLM tree search | **`sap_automate_kb::DocumentTree`** + `KnowledgeStore::get_document_tree` default impl + `sap.kb.navigate` MCP tool. Pure-Rust tree builder from Markdown ATX / numbered / `SECTION:` markers. Each node carries title, extractive summary, byte range, approx token count, children. Navigation reasoning stays with the agent (the MCP client), keeping the crate LLM-free. 6 unit tests + 4 in-process binary integration tests. |
+| **Retrieval transparency** | absent across all references | **`RetrievalDiagnostics`** on `SearchResponse` — dense/sparse candidate counts, RRF overlap (consensus signal), tokenised query terms (so the operator sees *what* BM25 actually searched for, surfacing typos / lost identifiers), reranker-ran flag, truncated-by-top-k flag. Pure additive, no ordering change. |
+| **KB chunk dedup** | absent in references; OpenKB does it at compile time via wiki synthesis | **Content-hash dedup at upsert** in `InMemoryKb`: writing `(chunk_id, text)` whose `content_hash(text)` already exists is a no-op. `UpsertStats::chunks_dedup_skipped` surfaces the count. Pre-empts the foot-gun where a re-crawl with unchanged content overwrites the same rows. |
+| **Crawler — robots.txt** | Crawl4AI yes; absent in MCP reference projects | **`sap_automate_ingest::robots::RobotsTxt`** — RFC 9309 subset (User-agent groups, longest-prefix Allow/Disallow, Crawl-delay). 7 unit tests cover wildcard, specific-agent override, longest-prefix-allow-wins, comment stripping, empty body. |
+| **Crawler — rate limiting** | Crawl4AI yes | **`sap_automate_ingest::rate_limit::RateLimiter`** — per-host token-bucket spacing; `set_interval` per host (e.g. from a parsed `Crawl-delay:`). 5 unit tests including independent-bucket and post-set-interval cadence. |
+| **Crawler — content filter** | Crawl4AI: "fit markdown" (BM25 against page topic) | **`sap_automate_ingest::fit_markdown::fit_markdown_filter`** — pure-Rust BM25 block filter. Drops short nav / breadcrumb blocks unconditionally, always keeps long substantive blocks, scores the middle range against the topic. Returns `FitStats { block_retention, char_retention }`. 4 unit tests. |
 
 ## Architectural moves
 

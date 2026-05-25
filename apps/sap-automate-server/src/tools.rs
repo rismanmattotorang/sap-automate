@@ -33,7 +33,106 @@ pub fn rag_tools(ctx: &Arc<ServerContext>) -> Vec<ToolDescriptor> {
         make_rag_tool(ctx, "bpmn.find_process", "Search the Signavio BPMN process repository.", Domain::Bpmn),
         make_rag_tool(ctx, "eam.search_apps", "Search the LeanIX EAM application fact sheets.", Domain::Leanix),
         make_rag_tool(ctx, "sap.help.search", "Search the SAP Help Portal corpus.", Domain::SapHelp),
+        tool_kb_navigate(ctx),
     ]
+}
+
+// --- sap.kb.navigate ------------------------------------------------------
+// OpenKB + PageIndex convergent pattern.  Walks the hierarchical document
+// tree built by `sap_automate_kb::build_document_tree`.  When the agent has
+// a long SAP Help page (period close, transport release, RAP service
+// design), section-by-section navigation beats similarity-blind retrieval.
+
+#[derive(Debug, Deserialize)]
+struct KbNavigateArgs {
+    document_id: String,
+    /// Optional dotted path into the tree (e.g. `"1.2"`).  Defaults to the
+    /// root, which lists the top-level sections.
+    #[serde(default)]
+    path: Option<String>,
+    /// How many levels of descendants to include.  Defaults to 1 (just the
+    /// immediate children) so a single call is bounded.
+    #[serde(default = "default_navigate_depth")]
+    depth: u32,
+}
+fn default_navigate_depth() -> u32 { 1 }
+
+fn tool_kb_navigate(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            let args: KbNavigateArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("sap.kb.navigate: invalid arguments: {e}"))),
+            };
+            // Use the KnowledgeStore's default tree builder via the RAG engine's store.
+            let store = ctx.rag.store();
+            let tree = match store.get_document_tree(&args.document_id).await {
+                Ok(Some(t)) => t,
+                Ok(None) => return Ok(CallToolResult::error(format!("sap.kb.navigate: document '{}' not found", args.document_id))),
+                Err(e) => return Ok(CallToolResult::error(format!("sap.kb.navigate: {e}"))),
+            };
+            let path = args.path.as_deref().unwrap_or("");
+            let node = if path.is_empty() {
+                &tree.root
+            } else {
+                match tree.root.find(path) {
+                    Some(n) => n,
+                    None => return Ok(CallToolResult::error(format!(
+                        "sap.kb.navigate: path '{path}' not found in document tree (max_depth={}, leaf_count={})",
+                        tree.max_depth, tree.leaf_count,
+                    ))),
+                }
+            };
+            let view = serialize_node_bounded(node, args.depth);
+            render_json("sap.kb.navigate", &serde_json::json!({
+                "document_id": tree.document_id,
+                "max_depth": tree.max_depth,
+                "leaf_count": tree.leaf_count,
+                "node": view,
+            }))
+        }
+    });
+    ToolDescriptor::new(
+        "sap.kb.navigate",
+        Some("Walk the hierarchical document tree (OpenKB + PageIndex pattern) section by section. Pass a document_id and an optional dotted path (e.g. '1.2.1') and depth to bound the returned subtree. Use this for long SAP Help pages / ABAP source files when similarity-blind retrieval would miss the right section.".into()),
+        ToolInputSchema::from_value(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "document_id": {"type": "string", "description": "Document id, e.g. 'sap_help:FI/period-close'"},
+                "path": {"type": "string", "description": "Optional dotted path, e.g. '1.2'. Omit to start at the root."},
+                "depth": {"type": "integer", "minimum": 0, "maximum": 4, "default": 1}
+            },
+            "required": ["document_id"],
+            "additionalProperties": false
+        })),
+        Arc::new(handler),
+    )
+}
+
+fn serialize_node_bounded(node: &sap_automate_kb::DocTreeNode, depth: u32) -> serde_json::Value {
+    let children: Vec<serde_json::Value> = if depth == 0 {
+        node.children.iter().map(|c| serde_json::json!({
+            "path": c.path,
+            "title": c.title,
+            "summary": c.summary,
+            "approx_tokens": c.approx_tokens,
+            "child_count": c.children.len(),
+        })).collect()
+    } else {
+        node.children.iter().map(|c| serialize_node_bounded(c, depth - 1)).collect()
+    };
+    serde_json::json!({
+        "path": node.path,
+        "depth": node.depth,
+        "title": node.title,
+        "summary": node.summary,
+        "start_index": node.start_index,
+        "end_index": node.end_index,
+        "approx_tokens": node.approx_tokens,
+        "children": children,
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -106,6 +205,8 @@ pub fn sap_tools(ctx: &Arc<ServerContext>) -> Vec<ToolDescriptor> {
     vec![
         tool_system_info(ctx),
         tool_system_health(ctx),
+        tool_system_cache_stats(ctx),
+        tool_system_cache_invalidate(ctx),
         tool_rfc_search(ctx),
         tool_rfc_metadata(ctx),
         tool_rfc_bulk_metadata(ctx),
@@ -115,6 +216,77 @@ pub fn sap_tools(ctx: &Arc<ServerContext>) -> Vec<ToolDescriptor> {
         tool_docs_search(ctx),
         tool_bapi_parse_return(ctx),
     ]
+}
+
+// --- sap.system.cache_stats ------------------------------------------------
+// Convergent with thupalo/sap-rfc-mcp-server `get_metadata_cache_stats`.
+// Returns hits/misses/entries/evictions/hit_ratio for the RFC metadata cache.
+
+fn tool_system_cache_stats(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |_args: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            match &ctx.metadata_cache {
+                None => render_json("sap.system.cache_stats", &serde_json::json!({
+                    "enabled": false,
+                    "note": "RFC metadata cache is disabled. Restart the server with --metadata-cache-ttl-secs > 0.",
+                })),
+                Some(cache) => {
+                    let s = cache.stats().await;
+                    render_json("sap.system.cache_stats", &serde_json::json!({
+                        "enabled": true,
+                        "hits": s.hits,
+                        "misses": s.misses,
+                        "entries": s.entries,
+                        "evictions": s.evictions,
+                        "hit_ratio": s.hit_ratio(),
+                    }))
+                }
+            }
+        }
+    });
+    ToolDescriptor::new(
+        "sap.system.cache_stats",
+        Some("Read RFC metadata cache statistics (thupalo/sap-rfc-mcp-server pattern). Returns hits, misses, entries, evictions, and hit_ratio. Always read-only — touches local cache state only, never SAP.".into()),
+        ToolInputSchema::from_value(serde_json::json!({"type": "object", "additionalProperties": false})),
+        Arc::new(handler),
+    )
+}
+
+// --- sap.system.cache_invalidate -------------------------------------------
+// Operator escape hatch for the case where an upstream transport import has
+// changed an RFC signature and the cached metadata is now stale.  Read-only
+// from the SAP-state perspective (we never write to SAP), but it does mutate
+// the local cache, so the description is explicit.
+
+fn tool_system_cache_invalidate(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |_args: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            match &ctx.metadata_cache {
+                None => render_json("sap.system.cache_invalidate", &serde_json::json!({
+                    "enabled": false,
+                    "note": "RFC metadata cache is disabled. Nothing to invalidate.",
+                })),
+                Some(cache) => {
+                    let before = cache.stats().await.entries;
+                    cache.invalidate_all().await;
+                    render_json("sap.system.cache_invalidate", &serde_json::json!({
+                        "ok": true,
+                        "entries_dropped": before,
+                    }))
+                }
+            }
+        }
+    });
+    ToolDescriptor::new(
+        "sap.system.cache_invalidate",
+        Some("Drop every entry in the RFC metadata cache so the next sap.rfc.metadata / bulk_metadata call re-fetches from SAP. Use after a transport import that changed RFC signatures. Does not touch SAP state.".into()),
+        ToolInputSchema::from_value(serde_json::json!({"type": "object", "additionalProperties": false})),
+        Arc::new(handler),
+    )
 }
 
 // --- sap.system.health -----------------------------------------------------

@@ -74,6 +74,18 @@ pub enum TrafficEvent {
     SessionClose { id: String },
     Log { level: LogLevel, source: String, message: String },
     KbStat { collection: String, points: u64, staleness_pct: f64 },
+    /// RFC metadata cache snapshot (thupalo pattern, polled from the
+    /// `sap-cache://stats` resource on the live admin feed; synthesised by
+    /// the offline traffic generator).
+    CacheStat { hits: u64, misses: u64, entries: usize, hit_ratio: f64 },
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct CacheSnapshot {
+    pub hits: u64,
+    pub misses: u64,
+    pub entries: usize,
+    pub hit_ratio: f64,
 }
 
 pub struct App {
@@ -83,6 +95,7 @@ pub struct App {
     pub sessions: HashMap<String, SessionRow>,
     pub logs: VecDeque<LogEntry>,
     pub kb_collections: HashMap<String, (u64, f64)>,
+    pub cache: CacheSnapshot,
     pub started_at: Instant,
 }
 
@@ -95,6 +108,7 @@ impl App {
             sessions: HashMap::new(),
             logs: VecDeque::with_capacity(200),
             kb_collections: HashMap::new(),
+            cache: CacheSnapshot::default(),
             started_at: Instant::now(),
         }
     }
@@ -132,6 +146,9 @@ impl App {
             }
             TrafficEvent::KbStat { collection, points, staleness_pct } => {
                 self.kb_collections.insert(collection, (points, staleness_pct));
+            }
+            TrafficEvent::CacheStat { hits, misses, entries, hit_ratio } => {
+                self.cache = CacheSnapshot { hits, misses, entries, hit_ratio };
             }
         }
     }

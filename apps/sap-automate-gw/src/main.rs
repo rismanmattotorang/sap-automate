@@ -147,11 +147,43 @@ async fn route(
         serde_json::json!({ "channel": format!("{:?}", &msg.channel), "text": msg.text }),
     ).with_tenant(&msg.user_id));
 
-    // Phase 8 routing: pick a tool by intent keywords.  The router
-    // surface is identical for the LLM-driven version we'll wire in
-    // production; only the picker changes.
+    // Phase 8 routing: pick a tool — OR a skill — by intent keywords.
+    // The router surface is identical for the LLM-driven version we'll
+    // wire in production; only the picker changes.
+    //
+    // marianfoo/sap-ai-mcp-servers convergent insight: agents should
+    // invoke *skills*, not raw tools, whenever a workflow exists. The
+    // gateway honours that by routing to `prompts/get` when the user's
+    // intent matches a known skill.
     let lc = msg.text.to_lowercase();
     let address = format!("{}:{}", msg.channel.scheme(), msg.conversation_id);
+
+    if let Some((skill, args)) = match_skill(&lc) {
+        match mcp.get_prompt(skill, args).await {
+            Ok(p) => {
+                let text_payload = p.messages.iter()
+                    .filter_map(|m| if let mcp_core::ToolContent::Text { text } = &m.content { Some(text.as_str()) } else { None })
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+                memory.working.append(&msg.conversation_id, MemoryEntry::new(
+                    Tier::Working,
+                    "agent_turn",
+                    serde_json::json!({ "skill": skill, "result_chars": text_payload.len() }),
+                ).with_tenant(&msg.user_id));
+                return Ok(OutgoingMessage {
+                    address,
+                    text: format!(
+                        "Routed via skill `{skill}`.\n\n{text_payload}\n\nSession context: {} working entries.",
+                        memory.working.recent(&msg.conversation_id, 100).len(),
+                    ),
+                    rich: None,
+                });
+            }
+            // If the prompt doesn't exist (older server, or skill not loaded),
+            // fall through to the tool-based router below.
+            Err(e) => tracing::warn!(skill, error = %e, "skill routing failed, falling back to tools"),
+        }
+    }
 
     let (tool, args) = if lc.contains("atc") || lc.contains("test cockpit") {
         ("sap.docs.search", serde_json::json!({
@@ -193,6 +225,60 @@ async fn route(
         ),
         rich: None,
     })
+}
+
+/// Map a lower-cased user message to a skill + argument map.  Returns
+/// `None` when no skill matches — the caller falls back to tool routing.
+/// Deliberately simple keyword match; the LLM-driven router in v1.5 will
+/// replace this without touching the trait surface.
+fn match_skill(lc: &str) -> Option<(&'static str, Option<serde_json::Value>)> {
+    if (lc.contains("sod") || lc.contains("segregation of duties") || lc.contains("authorisation audit") || lc.contains("authorization audit"))
+        && (lc.contains("audit") || lc.contains("review") || lc.contains("sod"))
+    {
+        // Extract a trailing token as user/role; default to wildcard.
+        let target = lc.split_whitespace().last().unwrap_or("*").to_uppercase();
+        return Some(("sap.skill.security_sod_audit", Some(serde_json::json!({
+            "user_or_role": target,
+            "scope": "user"
+        }))));
+    }
+    if lc.contains("bw") && (lc.contains("datasphere") || lc.contains("modernis") || lc.contains("moderniz") || lc.contains("migrat")) {
+        return Some(("sap.skill.bw_to_datasphere_migration", Some(serde_json::json!({
+            "bw_object": "*"
+        }))));
+    }
+    if lc.contains("period close") || lc.contains("period-close") || lc.contains("closing") && lc.contains("fi") {
+        return Some(("sap.skill.period_close_investigation", Some(serde_json::json!({
+            "company_code": "1000"
+        }))));
+    }
+    if lc.contains("code review") || lc.contains("review") && (lc.contains("abap") || lc.contains("class") || lc.contains("program")) {
+        return Some(("sap.skill.abap_code_review", Some(serde_json::json!({
+            "object_name": "ZCL_FIN_POSTER",
+            "kind": "class"
+        }))));
+    }
+    if lc.contains("odata") && (lc.contains("design") || lc.contains("expose") || lc.contains("proxy")) {
+        return Some(("sap.skill.odata_service_design", Some(serde_json::json!({
+            "service_name": "ZUI_PURCHASE_ORDER_O2"
+        }))));
+    }
+    if lc.contains("transport") && (lc.contains("impact") || lc.contains("release") || lc.contains("analyse") || lc.contains("analyze")) {
+        return Some(("sap.skill.transport_impact_analysis", Some(serde_json::json!({
+            "transport_id": "ER1K900042"
+        }))));
+    }
+    if lc.contains("clean core") || lc.contains("clean-core") {
+        return Some(("sap.skill.clean_core_audit", Some(serde_json::json!({
+            "package": "ZFIN"
+        }))));
+    }
+    if lc.contains("guideline") || lc.contains("how should i think") || lc.contains("preflight") || lc.contains("pre-flight") {
+        return Some(("sap.skill.karpathy_guidelines", Some(serde_json::json!({
+            "task": "investigate without a clear scope"
+        }))));
+    }
+    None
 }
 
 /// JobExecutor that fires scheduled jobs against the live MCP server
