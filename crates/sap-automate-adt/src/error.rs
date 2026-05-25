@@ -29,6 +29,8 @@ pub enum AdtErrorCode {
     /// Object exists but in a locked state (transport not released, locked
     /// by another user, etc.).
     Locked = -32267,
+    /// Server bug / programming error.  Never retried.
+    Internal = -32298,
 }
 
 impl AdtErrorCode {
@@ -96,9 +98,36 @@ impl AdtError {
             AdtError::DataPreviewBlocked(_) => AdtErrorCode::DataPreviewBlocked,
             AdtError::PermissionDenied(_) => AdtErrorCode::PermissionDenied,
             AdtError::Locked(_) => AdtErrorCode::Locked,
-            AdtError::Internal(_) => AdtErrorCode::Timeout,
+            // Internal errors are programmer bugs, not transient — must
+            // NOT be retried.  See Phase 7 code-review pass.
+            AdtError::Internal(_) => AdtErrorCode::Internal,
         }
     }
 
     pub fn is_transient(&self) -> bool { self.code().is_transient() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adt_internal_is_permanent() {
+        let e = AdtError::Internal("bug".into());
+        assert!(!e.is_transient(),
+            "AdtError::Internal must be permanent to prevent retry-loop on programmer bugs");
+    }
+
+    #[test]
+    fn adt_transient_kinds_are_classified_correctly() {
+        for code in [AdtErrorCode::Timeout, AdtErrorCode::DestinationDown,
+                     AdtErrorCode::CsrfRefresh, AdtErrorCode::RateLimited] {
+            assert!(code.is_transient(), "{code:?} should be transient");
+        }
+        for code in [AdtErrorCode::AuthFailed, AdtErrorCode::NotFound,
+                     AdtErrorCode::Forbidden, AdtErrorCode::Internal,
+                     AdtErrorCode::DataPreviewBlocked, AdtErrorCode::Locked] {
+            assert!(!code.is_transient(), "{code:?} should NOT be transient");
+        }
+    }
 }

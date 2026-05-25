@@ -140,7 +140,7 @@ impl KnowledgeStore for QdrantStore {
                 }));
             }
             let body = json!({ "points": points });
-            let resp = self.http.put(&self.upsert_url(domain)).json(&body).send().await.map_err(req_err)?;
+            let resp = self.http.put(self.upsert_url(domain)).json(&body).send().await.map_err(req_err)?;
             if !resp.status().is_success() {
                 let s = resp.text().await.unwrap_or_default();
                 return Err(StoreError::Backend(format!("upsert {}: {}", domain.collection(), s)));
@@ -171,7 +171,7 @@ impl KnowledgeStore for QdrantStore {
                 "limit": query.top_k,
                 "with_payload": true,
             });
-            let resp = self.http.post(&self.search_url(domain)).json(&body).send().await.map_err(req_err)?;
+            let resp = self.http.post(self.search_url(domain)).json(&body).send().await.map_err(req_err)?;
             if !resp.status().is_success() {
                 let s = resp.text().await.unwrap_or_default();
                 warn!(domain = ?domain, "qdrant search failed: {s}");

@@ -64,6 +64,7 @@ pub struct LogEntry {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // Error variant used by future admin-endpoint feed; kept for API stability.
 pub enum LogLevel { Info, Warn, Error }
 
 #[derive(Clone)]

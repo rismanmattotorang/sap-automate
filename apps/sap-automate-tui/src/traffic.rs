@@ -16,6 +16,10 @@ const TOOLS: &[&str] = &[
 ];
 
 pub struct Synthetic {
+    /// Held for the future admin-endpoint feed: when we wire the TUI
+    /// to a running server's admin socket, the gateway's uptime is one
+    /// of the status-bar columns.
+    #[allow(dead_code)]
     started: Instant,
     tick: u64,
     sessions: Vec<String>,
@@ -25,6 +29,11 @@ impl Synthetic {
     pub fn new() -> Self {
         Self { started: Instant::now(), tick: 0, sessions: Vec::new() }
     }
+
+    /// Time elapsed since this synthetic feed started.  Used by the
+    /// status bar when the admin-endpoint feed is wired in Phase 7.
+    #[allow(dead_code)]
+    pub fn uptime(&self) -> std::time::Duration { self.started.elapsed() }
 
     pub fn tick(&mut self) -> Option<TrafficEvent> {
         self.tick += 1;
@@ -60,7 +69,7 @@ impl Synthetic {
                 staleness_pct: 0.9,
             }),
             19 => {
-                if self.tick % 200 == 0 {
+                if self.tick.is_multiple_of(200) {
                     Some(TrafficEvent::Log {
                         level: LogLevel::Warn,
                         source: "rag".into(),
@@ -96,12 +105,10 @@ impl Synthetic {
                 Some(TrafficEvent::ToolCall {
                     name: name.into(),
                     latency_us: base,
-                    error: self.tick % 197 == 0,
+                    error: self.tick.is_multiple_of(197),
                     breakdown,
                 })
             }
         }
     }
-
-    pub fn uptime(&self) -> std::time::Duration { self.started.elapsed() }
 }

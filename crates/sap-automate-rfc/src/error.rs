@@ -28,6 +28,8 @@ pub enum RfcErrorCode {
     InvalidParameter = -32240,
     PermissionDenied = -32250,
     SchemaViolation = -32260,
+    /// Server bug / programming error.  Never retried.
+    Internal = -32299,
 
     // Degraded (-32300..-32399): partial result
     PartialBulk = -32310,
@@ -97,9 +99,46 @@ impl RfcError {
             RfcError::PermissionDenied(_) => RfcErrorCode::PermissionDenied,
             RfcError::SchemaViolation(_) => RfcErrorCode::SchemaViolation,
             RfcError::PartialBulk(_) => RfcErrorCode::PartialBulk,
-            RfcError::Internal(_) => RfcErrorCode::Timeout, // map to transient
+            // Internal errors are programming bugs, not transient SAP
+            // outages — they must NOT be retried (Phase 7 code review).
+            RfcError::Internal(_) => RfcErrorCode::Internal,
         }
     }
 
     pub fn is_transient(&self) -> bool { self.code().is_transient() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transient_classification_only_matches_transient_range() {
+        for c in [
+            RfcErrorCode::Timeout, RfcErrorCode::DestinationDown,
+            RfcErrorCode::PoolExhausted, RfcErrorCode::CircuitOpen,
+            RfcErrorCode::UpstreamRateLimit,
+        ] {
+            assert!(c.is_transient(), "{c:?} should be transient");
+        }
+        for c in [
+            RfcErrorCode::AuthFailed, RfcErrorCode::NotFound,
+            RfcErrorCode::TableBufferOverflow, RfcErrorCode::InvalidParameter,
+            RfcErrorCode::PermissionDenied, RfcErrorCode::SchemaViolation,
+            RfcErrorCode::Internal,
+            RfcErrorCode::PartialBulk, RfcErrorCode::StaleMetadata,
+        ] {
+            assert!(!c.is_transient(), "{c:?} should NOT be transient");
+        }
+    }
+
+    #[test]
+    fn rfc_error_internal_is_permanent() {
+        // Regression for the Phase 7 review finding: previously
+        // Internal mapped to Timeout, which caused retry_with_backoff
+        // to spin on programming bugs.
+        let e = RfcError::Internal("bug".into());
+        assert!(!e.is_transient());
+        assert_eq!(e.code() as i32, RfcErrorCode::Internal as i32);
+    }
 }

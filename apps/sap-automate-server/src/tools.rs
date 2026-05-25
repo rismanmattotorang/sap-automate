@@ -105,6 +105,7 @@ fn make_rag_tool(ctx: &Arc<ServerContext>, name: &str, description: &str, domain
 pub fn sap_tools(ctx: &Arc<ServerContext>) -> Vec<ToolDescriptor> {
     vec![
         tool_system_info(ctx),
+        tool_system_health(ctx),
         tool_rfc_search(ctx),
         tool_rfc_metadata(ctx),
         tool_rfc_bulk_metadata(ctx),
@@ -112,7 +113,83 @@ pub fn sap_tools(ctx: &Arc<ServerContext>) -> Vec<ToolDescriptor> {
         tool_table_read(ctx),
         tool_table_structure(ctx),
         tool_docs_search(ctx),
+        tool_bapi_parse_return(ctx),
     ]
+}
+
+// --- sap.system.health -----------------------------------------------------
+
+fn tool_system_health(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |_args: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            let pool = ctx.sap_client.pool_status();
+            let snap = serde_json::json!({
+                "pool": { "cap": pool.cap, "available": pool.available, "in_use": pool.cap - pool.available },
+                "read_only_mode": ctx.read_only,
+                "adt_destination": ctx.adt_client.destination().redacted(),
+                "graph": {
+                    "nodes": ctx.graph.graph.stats().node_count,
+                    "edges": ctx.graph.graph.stats().edge_count,
+                    "communities": ctx.graph.communities.communities.len(),
+                },
+                "protocol_version": mcp_core::PROTOCOL_VERSION,
+            });
+            render_json("sap.system.health", &snap)
+        }
+    });
+    ToolDescriptor::new(
+        "sap.system.health",
+        Some("Operator health snapshot: connection pool, read-only mode, ADT destination summary, graph stats. Always read-only.".into()),
+        ToolInputSchema::from_value(serde_json::json!({"type": "object", "additionalProperties": false})),
+        Arc::new(handler),
+    )
+}
+
+// --- sap.bapi.parse_return -------------------------------------------------
+
+#[derive(Deserialize)]
+struct BapiParseArgs { value: serde_json::Value }
+
+fn tool_bapi_parse_return(_ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        async move {
+            let args: BapiParseArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("sap.bapi.parse_return: invalid arguments: {e}"))),
+            };
+            let msgs = sap_automate_rfc::parse_bapiret2(&args.value);
+            let any_failure = msgs.iter().any(|m| m.is_failure());
+            let summary = serde_json::json!({
+                "messages": msgs,
+                "any_failure": any_failure,
+                "guidance": if any_failure {
+                    "At least one message has severity E (error) or A (abort). DO NOT call BAPI_TRANSACTION_COMMIT. Call BAPI_TRANSACTION_ROLLBACK if you've already started writes."
+                } else if msgs.is_empty() {
+                    "No BAPIRET2 messages found in the supplied value. Either pass the full BAPI result or rerun the BAPI to capture the RETURN table."
+                } else {
+                    "All BAPIRET2 messages are non-failure (S/W/I). Safe to call BAPI_TRANSACTION_COMMIT."
+                }
+            });
+            render_json("sap.bapi.parse_return", &summary)
+        }
+    });
+    ToolDescriptor::new(
+        "sap.bapi.parse_return",
+        Some("Parse a BAPIRET2 array (the standard SAP return contract) and surface structured messages. Returns severity, message class, number, text, and a guidance string that tells the agent whether it's safe to commit.".into()),
+        ToolInputSchema::from_value(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "value": {
+                    "description": "The full JSON result from a sap.rfc.call invocation, or a bare BAPIRET2 array.",
+                }
+            },
+            "required": ["value"],
+            "additionalProperties": false,
+        })),
+        Arc::new(handler),
+    )
 }
 
 // --- sap.system.info -------------------------------------------------------

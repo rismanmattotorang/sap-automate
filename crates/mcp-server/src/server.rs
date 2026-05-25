@@ -126,10 +126,10 @@ pub struct ServerContext {
 impl ServerContext {
     fn capabilities(&self) -> ServerCapabilities {
         ServerCapabilities {
-            tools: (!self.tools.is_empty()).then(|| ToolsCapability { list_changed: false }),
+            tools: (!self.tools.is_empty()).then_some(ToolsCapability { list_changed: false }),
             resources: (!self.resources.is_empty())
-                .then(|| ResourcesCapability { list_changed: false, subscribe: false }),
-            prompts: (!self.prompts.is_empty()).then(|| PromptsCapability { list_changed: false }),
+                .then_some(ResourcesCapability { list_changed: false, subscribe: false }),
+            prompts: (!self.prompts.is_empty()).then_some(PromptsCapability { list_changed: false }),
             logging: None,
             extra: Default::default(),
         }
@@ -180,32 +180,25 @@ impl Server {
         }
     }
 
-    /// Drive the MCP dispatch loop over the given transport until EOF or
-    /// shutdown.  Concurrent tool invocations are spawned as tasks so a
-    /// tool that calls `elicit().await` doesn't block the recv loop —
-    /// the loop continues reading and routes elicitation responses to
-    /// the waiting tool via the `ElicitationHandle`.
+    /// Drive the MCP dispatch loop over any `Transport`.  Use this for
+    /// generic transports that don't expose split read/write halves;
+    /// elicitation is **disabled** because mid-call server-initiated
+    /// requests can't be safely interleaved with the single-actor
+    /// recv/send pattern (proven by load testing).
     ///
-    /// Architecture: the transport is owned by one I/O actor that
-    /// multiplexes recv and send through internal channels.  This keeps
-    /// `transport.recv()` from being polled inside a `select!` (which is
-    /// not cancellation-safe for line-buffered readers).
+    /// For stdio — and any other transport that exposes `into_parts()`
+    /// — prefer `run_stdio()`, which runs reader and writer on separate
+    /// tasks and is fully elicitation-safe.
     pub async fn run<T: Transport>(&self, transport: T) -> Result<()> {
-        // For stdio transports we want to split into independent read /
-        // write halves running on separate tasks.  Going through the
-        // single-trait recv/send via `select!` is not cancellation-safe
-        // for line-buffered readers (proven by load testing).  Generic
-        // transports fall back to the old single-task path with the
-        // accepted limitation that elicitation may not work over them.
-        self.run_split(transport).await
+        self.run_single_actor(transport).await
     }
 
-    async fn run_split<T: Transport>(&self, mut transport: T) -> Result<()> {
-        use tokio::sync::mpsc;
-        use mcp_core::jsonrpc::JSONRPC_VERSION;
-        let _ = JSONRPC_VERSION;
-
-        info!(server = %self.context.info.name, "MCP server starting (single-actor fallback)");
+    async fn run_single_actor<T: Transport>(&self, mut transport: T) -> Result<()> {
+        info!(
+            server = %self.context.info.name,
+            elicitation = "disabled",
+            "MCP server starting (single-actor; elicitation NOT supported on this transport)"
+        );
         // Generic transports without a split: serial recv/send.  Tools
         // that need elicitation should be invoked via a transport that
         // implements `into_parts` (stdio does).

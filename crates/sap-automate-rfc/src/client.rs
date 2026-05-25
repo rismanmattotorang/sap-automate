@@ -414,7 +414,25 @@ impl SapClient for MockSapClient {
             request.fields.clone()
         };
 
-        let conditions = parse_conditions(&request.where_conditions)?;
+        let mut conditions = parse_conditions(&request.where_conditions)?;
+
+        // SAP queries are always client-scoped.  If the caller didn't
+        // specify a MANDT / RCLNT clause and the table has one, restrict
+        // to the connection's client number so cross-client leaks are
+        // impossible by construction.  This matches the behaviour of
+        // SE16/SM30 and the standard RFC_READ_TABLE convention.
+        let client_field = table.structure.fields.first()
+            .filter(|f| (f.name == "MANDT" || f.name == "RCLNT") && f.type_token == "CLNT")
+            .map(|f| f.name.clone());
+        if let Some(field) = client_field.as_deref() {
+            let has_client_filter = conditions.iter()
+                .any(|(f, _, _)| f.eq_ignore_ascii_case(field));
+            if !has_client_filter {
+                conditions.push((field.into(), "=".into(), self.identity.get("client")
+                    .and_then(|v| v.as_str()).unwrap_or("100").to_string()));
+            }
+        }
+
         let mut rows: Vec<TableRow> = Vec::new();
         for row in &table.rows {
             if conditions.iter().all(|(field, op, value)| match_row(row, field, op, value)) {

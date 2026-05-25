@@ -115,7 +115,7 @@ impl InMemoryGraph {
     }
 
     fn seed(&mut self) {
-        let mut add = |g: &mut Self, id: &str, kind: EntityKind, label: &str, desc: &str, uri: Option<&str>, tags: &[&str]| {
+        let add = |g: &mut Self, id: &str, kind: EntityKind, label: &str, desc: &str, uri: Option<&str>, tags: &[&str]| {
             g.add_entity(Entity {
                 id: id.into(), kind, label: label.into(),
                 description: Some(desc.into()),

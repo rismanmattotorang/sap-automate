@@ -205,7 +205,7 @@ impl ChannelRegistry {
     pub async fn send(&self, msg: OutgoingMessage) -> Result<(), ChannelError> {
         let scheme = msg.address.split(':').next().unwrap_or("").to_string();
         let adapter = self.by_scheme.get(&scheme)
-            .ok_or_else(|| ChannelError::Unknown(scheme))?
+            .ok_or(ChannelError::Unknown(scheme))?
             .clone();
         adapter.send(msg).await
     }
