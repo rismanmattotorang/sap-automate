@@ -4,12 +4,12 @@
 
 **The Rust-native, MCP-native agentic interface for SAP S/4HANA.**
 
-*Sub-millisecond retrieval · 104 SAP-correctness tests · On-premise capable · Apache-2.0*
+*Sub-millisecond retrieval · 110 SAP-correctness tests · On-premise capable · Apache-2.0*
 
 Built by the **ParagonCorp TPO R&D Team**.
 
 [![CI](https://img.shields.io/badge/CI-passing-22c55e?style=flat-square&logo=githubactions)](.github/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-104%20passing-22d3ee?style=flat-square)](#tests)
+[![Tests](https://img.shields.io/badge/tests-110%20passing-22d3ee?style=flat-square)](#tests)
 [![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange?style=flat-square&logo=rust)](https://www.rust-lang.org)
 [![MCP](https://img.shields.io/badge/MCP-2025--06--18-8b5cf6?style=flat-square)](https://modelcontextprotocol.io)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
@@ -150,11 +150,22 @@ Every layer is a trait-based seam: `KnowledgeStore`, `EmbeddingClient`, `SapClie
 | **Knowledge graph** (4) | `kb.multi_hop` (HippoRAG), `kb.global_query` (GraphRAG), `kb.summarise` (RAPTOR), `kb.graph_neighborhood` |
 | **Workflows** (3, write, gated) | `sap.workflow.create_purchase_order`, `sap.workflow.maintain_customer_master`, `sap.workflow.release_transport` |
 
-Plus **11 MCP resources**, **11 MCP prompts** (3 built-in + 8 disk-loaded skills auto-discovered from `./skills/*.md`).
+Plus **11 MCP resources**, **16 MCP prompts** (3 built-in + 13 disk-loaded skills auto-discovered from `./skills/*.md`).
+
+The skill library bundles **behavioural guidelines** alongside SAP workflows:
+
+| Skill | What it captures |
+|---|---|
+| `sap.skill.karpathy_guidelines` | Four pre-flight principles (think-before, simplicity, surgical, goal-driven) — ported with attribution from [`multica-ai/andrej-karpathy-skills`](https://github.com/multica-ai/andrej-karpathy-skills) (MIT) |
+| `sap.skill.aipnv_ai_pairing` | AI-Pairing-Not-Vibing — five-question anti-autopilot checklist for every write call ([`fr0ster/mcp-abap-adt`](https://github.com/fr0ster/mcp-abap-adt) stance) |
+| `sap.skill.odata_service_design` | Convergent OData generic-proxy design discipline ([`marianfoo/sap-ai-mcp-servers`](https://github.com/marianfoo/sap-ai-mcp-servers) pattern) |
+| `sap.skill.security_sod_audit` | Segregation-of-Duties audit, read-only across `USR02` / `AGR_*` / `RFCDES` |
+| `sap.skill.bw_to_datasphere_migration` | BW modernisation classification matrix + 3-wave plan |
+| `sap.skill.abap_code_review` · `sap.skill.clean_core_audit` · `sap.skill.period_close_investigation` · `sap.skill.transport_impact_analysis` · `sap.skill.rap_service_scaffolding` · `sap.skill.po_creation_elicit` · `sap.skill.customer_master_elicit` · `sap.skill.transport_release_elicit` | The eight v1.0 SAP-domain skills |
 
 ## Production posture
 
-- ✅ **104 tests passing** (unit + 17 ADT integration tests against a mock SAP server + 7 SAP-precision tests + 4 elicitation round-trips + 4 channel/scheduler/memory tests)
+- ✅ **110 tests passing** (unit + 17 ADT integration tests against a mock SAP server + 7 SAP-precision tests + 4 elicitation round-trips + 4 channel/scheduler/memory tests + 6 RFC metadata-cache tests)
 - ✅ **Read-only by default**, `--enable-writes` to flip
 - ✅ **Structured error taxonomy** mapped to MCP JSON-RPC error codes (transient / permanent / degraded)
 - ✅ **AGENTS.md guardrails** loaded from disk; surfaced in `initialize.instructions` and as MCP resource
@@ -175,7 +186,7 @@ sap-automate/
 │   ├── mcp-transport/               stdio + HTTP/SSE transports
 │   ├── mcp-server/                  capability router + elicitation runtime
 │   ├── mcp-client/                  async client + ElicitationDelegate
-│   ├── sap-automate-rfc/            SapClient + RFC catalogue + BAPIRET2 parser
+│   ├── sap-automate-rfc/            SapClient + RFC catalogue + BAPIRET2 parser + MetadataCache (TTL)
 │   ├── sap-automate-adt/            AdtClient (HTTP + mock; CSRF cache)
 │   ├── sap-automate-kb/             KB schema + InMemory + Qdrant
 │   ├── sap-automate-rag/            Hybrid RAG + reranker + graph layers
@@ -195,7 +206,7 @@ sap-automate/
 │   ├── sample-server/               minimal echo+add MCP server
 │   ├── sample-client/               CLI MCP client
 │   └── web/                         Next.js 14 web UI
-├── skills/                        ← 8 auto-loaded agentic skills
+├── skills/                        ← 13 auto-loaded agentic skills (8 SAP-domain + 5 behavioural / design)
 ├── deploy/                        ← Dockerfile + K8s manifests + runbook
 ├── docs/                          ← SAPAutomate.pdf, ROADMAP, SAP_CORRECTNESS, COMPARISON
 └── .github/workflows/             ← CI + release
@@ -235,12 +246,13 @@ SAP-Automate is built and maintained by the **ParagonCorp Technology Product Own
 
 Reference designs studied while building this:
 
-- [`thupalo/sap-rfc-mcp-server`](https://github.com/thupalo/sap-rfc-mcp-server) — connection pooling + metadata cache patterns
+- [`multica-ai/andrej-karpathy-skills`](https://github.com/multica-ai/andrej-karpathy-skills) — behavioural-guidelines skill format (think-before-coding, simplicity, surgical changes, goal-driven execution); ported into `skills/karpathy-guidelines.md`
+- [`thupalo/sap-rfc-mcp-server`](https://github.com/thupalo/sap-rfc-mcp-server) — connection pooling + metadata cache patterns; TTL cache decorator now lives in `crates/sap-automate-rfc/src/metadata_cache.rs`
 - [`CDataSoftware/sap-erp-mcp-server-by-cdata`](https://github.com/CDataSoftware/sap-erp-mcp-server-by-cdata) — read-only-by-default safety property
 - [`SAP/mdk-mcp-server`](https://github.com/SAP/mdk-mcp-server) — AGENTS.md + constrained-enum tool params
 - [`mario-andreschak/mcp-abap-adt`](https://github.com/mario-andreschak/mcp-abap-adt) — ADT REST URL canon
-- [`fr0ster/mcp-abap-adt`](https://github.com/fr0ster/mcp-abap-adt) — handler-exposure groups + multi-transport
-- [`marianfoo/sap-ai-mcp-servers`](https://github.com/marianfoo/sap-ai-mcp-servers) — 40+ server meta-registry, skills-layer convergence
+- [`fr0ster/mcp-abap-adt`](https://github.com/fr0ster/mcp-abap-adt) — handler-exposure groups + multi-transport + the AIPNV ("AI Pairing, Not Vibing") anti-autopilot stance now captured as `skills/aipnv-ai-pairing.md`
+- [`marianfoo/sap-ai-mcp-servers`](https://github.com/marianfoo/sap-ai-mcp-servers) — 40+ server meta-registry, skills-layer convergence, generic OData proxy pattern (`skills/odata-service-design.md`), Security MCP family (`skills/security-sod-audit.md`), BW-modernisation servers (`skills/bw-to-datasphere-migration.md`)
 
 ## License
 

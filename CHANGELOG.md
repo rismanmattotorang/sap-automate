@@ -6,6 +6,68 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [Unreleased]
+
+A targeted convergence pass after surveying
+[`multica-ai/andrej-karpathy-skills`](https://github.com/multica-ai/andrej-karpathy-skills)
+and re-reading the six reference SAP MCP servers tracked in
+`docs/COMPARISON.md`. Follows the Karpathy
+"Simplicity First / Surgical Changes" discipline — additive only,
+no rewrites.
+
+### Added
+
+- **`skills/karpathy-guidelines.md`** — port of Multica's
+  `karpathy-guidelines` SKILL (MIT, attributed) adapted with SAP-specific
+  examples. Loaded by `SkillRegistry` as the
+  `sap.skill.karpathy_guidelines` MCP prompt.
+- **`skills/aipnv-ai-pairing.md`** — AIPNV anti-autopilot five-question
+  checklist that surfaces the `fr0ster/mcp-abap-adt` stance as an
+  invokable pre-flight skill.
+- **`skills/odata-service-design.md`** — generic OData-proxy design
+  discipline (metadata-first → tool-surface mapping → EDM-to-JSON-Schema
+  conversion → auth binding → exposure policy → verification gates).
+  Convergent pattern from `marianfoo/sap-ai-mcp-servers`.
+- **`skills/security-sod-audit.md`** — read-only Segregation-of-Duties
+  audit walking `USR02` / `AGR_USERS` / `AGR_1251` / `AGR_TCODES` /
+  `RFCDES`; bundled SoD rule library for FI/MM/SD/basis conflict pairs.
+- **`skills/bw-to-datasphere-migration.md`** — BW modernisation
+  classification matrix + custom-code surfacing + 3-wave plan + risk
+  register.
+- **`sap-automate-rfc::MetadataCache`** — TTL-keyed decorator over any
+  `SapClient`. Implements the `thupalo/sap-rfc-mcp-server` pattern:
+  caches `RfcFunctionMeta` by `(function, language)`, splits bulk reads
+  into hits + misses, exposes `CacheStats` for Prometheus, supports
+  `invalidate_all()` for system-role flips.  `tokio::sync::RwLock`-based,
+  no extra dependencies.  6 unit tests cover hit/miss, TTL=0 disable,
+  TTL expiry, bulk-split, invalidation, and `(function, language)`
+  keying.
+- **Behavioural-guidelines section in `AGENTS.md`** — restates the four
+  Karpathy principles as pre-flight rules; cross-links the new skills.
+
+### Changed
+
+- Skill count: **8 → 13** auto-discovered skills.
+- Test count: **104 → 110** passing tests (+6 `metadata_cache` tests).
+- MCP prompts surfaced via `prompts/list`: **11 → 16**.
+- `README.md` — refreshed credits, added skill table, repository-layout
+  blurb; added `MetadataCache (TTL)` mention in `sap-automate-rfc`
+  description.
+
+### Notes
+
+- Nothing in this release is breaking. Public API of `sap-automate-rfc`
+  gains a `metadata_cache` module and re-exports `MetadataCache` +
+  `CacheStats`; the trait signature of `SapClient` is unchanged.
+- No new external dependencies.  The cache uses `tokio::sync::RwLock`,
+  `std::time::Instant`, and the existing `async-trait` already in
+  workspace.
+- The 5 new skills carry valid YAML-style frontmatter and round-trip
+  through `parse_skill_file()`; tests in `sap-automate-skills` validate
+  the loader unchanged.
+
+---
+
 ## [1.0.0] — 2026-05-25  ·  First public release
 
 The first general-availability release of **SAP-Automate** — a

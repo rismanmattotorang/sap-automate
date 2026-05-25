@@ -22,10 +22,12 @@ pub mod bapiret2;
 pub mod client;
 pub mod credentials;
 pub mod error;
+pub mod metadata_cache;
 pub mod pool;
 pub mod retry;
 
 pub use bapiret2::{BapiRet2Message, BapiRet2Severity, parse_bapiret2};
+pub use metadata_cache::{CacheStats, MetadataCache};
 
 pub use client::{
     BulkMetadata, MockSapClient, ReadTableRequest, RfcCallRequest, RfcFunctionMeta,

@@ -15,6 +15,7 @@ that follow from them.
 | **`mario-andreschak/mcp-abap-adt`** | github.com/mario-andreschak/mcp-abap-adt | TypeScript, 13 read-only ADT tools |
 | **`fr0ster/mcp-abap-adt`** | github.com/fr0ster/mcp-abap-adt | TypeScript, 60+ tools, full CRUD, RAP-first, multi-transport, "AI Pairing, Not Vibing" |
 | **`marianfoo/sap-ai-mcp-servers`** | github.com/marianfoo/sap-ai-mcp-servers | Meta-registry of 40+ SAP MCP servers, skills, and Claude plugins |
+| **`multica-ai/andrej-karpathy-skills`** | github.com/multica-ai/andrej-karpathy-skills | Skill repository — behavioural guidelines (MIT) distilled from Andrej Karpathy's observations on LLM coding pitfalls |
 | SAP Community blog #1 (ABAP add-on for ECC/S4) | community.sap.com | ABAP add-on |
 | SAP Community blog #2 (Mobile MCP) | community.sap.com | SAP announcement, MDK |
 
@@ -114,6 +115,32 @@ that follow from them.
 - **Knowledge-driven decision-making**: documentation MCP servers
   (SAP Docs MCP, SAP Notes MCP) inform agent choices before execution.
 
+### `multica-ai/andrej-karpathy-skills`
+
+- **Single-file behavioural skill** (`skills/karpathy-guidelines/SKILL.md`,
+  MIT-licensed) distilling four principles from
+  [Karpathy's observations](https://x.com/karpathy/status/2015883857489522876)
+  on LLM coding pitfalls:
+  1. **Think before coding** — surface assumptions; don't silently pick
+     one of multiple interpretations.
+  2. **Simplicity first** — minimum code; no speculative abstractions;
+     no error handling for impossible cases.
+  3. **Surgical changes** — touch only what the request demands; match
+     existing style; orphan only what your change orphaned.
+  4. **Goal-driven execution** — transform tasks into verifiable
+     success criteria; loop independently.
+- **Insight for us**: the *form* of a behavioural skill — frontmatter +
+  numbered principles + acceptance checklist — slots cleanly into
+  SAP-Automate's existing `SkillRegistry` without any change to the
+  loader. The principles themselves are a force-multiplier on top of
+  AGENTS.md guardrails (which constrain *what* the agent may call) by
+  constraining *how* it should reason before any call.
+- **Design move**: port the skill verbatim in spirit, with SAP-specific
+  examples in each principle (period close, BAPI selection,
+  read-only-by-default retrieval-layer escalation). Land it as
+  `skills/karpathy-guidelines.md` and surface it in `AGENTS.md` as the
+  default pre-flight.
+
 ### "Developing Mobile Apps with AI Agents" blog (SAP, official)
 
 - **AI-agent-first design**: tools designed for agent decision-making,
@@ -150,7 +177,9 @@ that follow from them.
 | **AI-pairing-not-vibing safety stance** | fr0ster | **Multiple lines of defence**: exposure policy + per-call `read_only` flag + per-RFC `read_only` metadata + AGENTS.md guardrails surfaced in handshake + structured error codes |
 | **Operator TUI** | mostly absent in references | **5-tab Ratatui TUI** (Sessions / Tools / KB / RAG / Logs) with live LatencyBreakdown gauge against the 80 ms budget, per-tool P50/P95/P99, KB staleness, structured log tail. Connects via admin endpoint or local synthetic feed for offline ops drills |
 | **Web UI** | mostly absent (CData ships a minimal management UI; SAP Joule is proprietary; the marianfoo registry catalogues 40+ servers but only one mentions a "web management interface") | **Next.js 14 App Router** with 5 routes that speak MCP 2025-06-18 directly via HTTP+JSON-RPC through a same-origin proxy. **Query Lab** shows ranked results with citation chips colour-coded by URI scheme — no other open-source SAP MCP has this. **Tool Explorer** auto-generates forms from each tool's JSON Schema and surfaces the read-only/write flag. **Skill Lab** live-renders any prompt with argument substitution as you type. **Resources** browser groups by URI scheme. **Operations** dashboard mirrors the TUI with a live latency-budget gauge against the 80 ms gate |
-| **Skills layer** | mdk + fr0ster + marianfoo | **`SkillRegistry` auto-discovers markdown skills** from `./skills/`, `./.sap-automate/skills/`, `~/.config/sap-automate/skills/`. Each skill = one MCP prompt. Frontmatter declares required tools (validated at registry time), arguments, tags. 5 starter skills shipped: `sap.skill.period_close_investigation`, `sap.skill.transport_impact_analysis`, `sap.skill.rap_service_scaffolding`, `sap.skill.clean_core_audit`, `sap.skill.abap_code_review` |
+| **Skills layer** | mdk + fr0ster + marianfoo | **`SkillRegistry` auto-discovers markdown skills** from `./skills/`, `./.sap-automate/skills/`, `~/.config/sap-automate/skills/`. Each skill = one MCP prompt. Frontmatter declares required tools (validated at registry time), arguments, tags. **13 skills shipped**: 8 SAP-domain (period_close_investigation, transport_impact_analysis, rap_service_scaffolding, clean_core_audit, abap_code_review, po_creation_elicit, customer_master_elicit, transport_release_elicit) + 5 behavioural / design (karpathy_guidelines, aipnv_ai_pairing, odata_service_design, security_sod_audit, bw_to_datasphere_migration). |
+| **Behavioural pre-flight** | absent across all references | **`sap.skill.karpathy_guidelines`** ported from [`multica-ai/andrej-karpathy-skills`](https://github.com/multica-ai/andrej-karpathy-skills) (MIT) with SAP-specific examples. Surfaced in `AGENTS.md`. Slots into the existing `SkillRegistry` with zero loader changes. |
+| **RFC metadata cache** | thupalo: file-based, persistent, compressed; ~1–5 ms cached vs ~200–500 ms direct | **`MetadataCache<C: SapClient>` decorator** in `sap-automate-rfc`: TTL-keyed `(function, language)` cache over any `SapClient`. Bulk reads split into hits + misses so only misses hit the SAP system. `CacheStats` surfaced for Prometheus. `invalidate_all()` for system-role flips. No extra deps (`tokio::sync::RwLock`). Persistence + compression deferred behind the trait — easy follow-up if real load demands it. |
 
 ## Architectural moves
 
