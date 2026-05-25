@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sap-automate-server
+  namespace: sap-automate
+  labels:
+    app.kubernetes.io/name: sap-automate-server
+    app.kubernetes.io/part-of: sap-automate
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: sap-automate-server
+  ports:
+    - name: http
+      port: 3030
+      targetPort: http
+      protocol: TCP
+  # Sticky sessions are important — the paper §IV-K reference deployment
+  # uses consistent hashing on `mcp-session-id`.  ClusterIP supports
+  # `sessionAffinity: ClientIP` as a coarse first step; the real
+  # session-aware routing lives in the Envoy/Istio sidecar config (see
+  # `helm/sap-automate/templates/envoyfilter.yaml` for an example).
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600

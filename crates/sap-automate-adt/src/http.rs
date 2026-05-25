@@ -357,31 +357,95 @@ async fn adt_source(client: &HttpAdtClient, name: &str, kind: AbapObjectKind) ->
     })
 }
 
-/// Minimal XML parser for `/sap/bc/adt/repository/nodestructure` responses.
+/// XML parser for `/sap/bc/adt/repository/nodestructure` responses.
+///
+/// SAP returns one or both of these shapes (both verified against open-
+/// source ADT clients):
+///
+///   1. **Child-element form** (the standard `asx:abap` response from
+///      `SEU_ADT_REPOSITORY_OBJ_NODE`):
+///      ```xml
+///      <SEU_ADT_REPOSITORY_OBJ_NODE>
+///        <OBJECT_TYPE>CLAS/OC</OBJECT_TYPE>
+///        <OBJECT_NAME>ZCL_FOO</OBJECT_NAME>
+///        <DESCRIPTION>...</DESCRIPTION>
+///        <OBJECT_URI>...</OBJECT_URI>
+///      </SEU_ADT_REPOSITORY_OBJ_NODE>
+///      ```
+///   2. **Attribute form** (older `adtcore:objectReference` shape):
+///      `<adtcore:objectReference adtcore:name="..." adtcore:type="..."/>`
 fn parse_nodestructure(xml: &str) -> Vec<PackageMember> {
     use quick_xml::events::Event;
     use quick_xml::Reader;
+
+    enum CurrentField { None, ObjectType, ObjectName, Description }
     let mut out = Vec::new();
     let mut reader = Reader::from_str(xml);
     let mut buf = Vec::new();
+    let mut in_node = false;
+    let mut current_field = CurrentField::None;
+    let mut name = String::new();
+    let mut desc: Option<String> = None;
+    let mut kind_str = String::new();
+
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Empty(e)) | Ok(Event::Start(e)) => {
-                if e.name().as_ref() == b"OBJECT" || e.name().as_ref() == b"adtcore:objectReference" {
-                    let mut name = String::new();
-                    let mut desc: Option<String> = None;
-                    let mut kind_str = String::new();
+            Ok(Event::Start(e)) => {
+                let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                if tag.ends_with("SEU_ADT_REPOSITORY_OBJ_NODE") || tag == "OBJECT" {
+                    in_node = true;
+                    name.clear(); kind_str.clear(); desc = None;
+                } else if in_node {
+                    if tag.ends_with("OBJECT_TYPE") { current_field = CurrentField::ObjectType; }
+                    else if tag.ends_with("OBJECT_NAME") { current_field = CurrentField::ObjectName; }
+                    else if tag.ends_with("DESCRIPTION") { current_field = CurrentField::Description; }
+                    else { current_field = CurrentField::None; }
+                }
+            }
+            Ok(Event::Empty(e)) => {
+                // The attribute form: a single self-closing element.
+                if e.name().as_ref().ends_with(b"objectReference") || e.name().as_ref() == b"OBJECT" {
+                    let mut n = String::new();
+                    let mut d: Option<String> = None;
+                    let mut k = String::new();
                     for attr in e.attributes().flatten() {
                         let key = String::from_utf8_lossy(attr.key.as_ref()).into_owned();
                         let val = attr.unescape_value().unwrap_or_default().into_owned();
-                        if key.contains("name") { name = val; }
-                        else if key.contains("description") { desc = Some(val); }
-                        else if key.contains("type") { kind_str = val; }
+                        if key.contains("name") { n = val; }
+                        else if key.contains("description") { d = Some(val); }
+                        else if key.contains("type") { k = val; }
                     }
-                    if !name.is_empty() {
-                        let kind = map_kind(&kind_str);
-                        out.push(PackageMember { name, kind, description: desc });
+                    if !n.is_empty() {
+                        out.push(PackageMember { name: n, kind: map_kind(&k), description: d });
                     }
+                }
+            }
+            Ok(Event::Text(t)) => {
+                let s = t.unescape().unwrap_or_default().to_string();
+                let trimmed = s.trim();
+                if !trimmed.is_empty() && in_node {
+                    match current_field {
+                        CurrentField::ObjectType => kind_str = trimmed.into(),
+                        CurrentField::ObjectName => name = trimmed.into(),
+                        CurrentField::Description => desc = Some(trimmed.into()),
+                        CurrentField::None => {}
+                    }
+                }
+            }
+            Ok(Event::End(e)) => {
+                let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                if tag.ends_with("SEU_ADT_REPOSITORY_OBJ_NODE") || tag == "OBJECT" {
+                    if in_node && !name.is_empty() {
+                        out.push(PackageMember {
+                            name: std::mem::take(&mut name),
+                            kind: map_kind(&kind_str),
+                            description: desc.take(),
+                        });
+                    }
+                    in_node = false;
+                    current_field = CurrentField::None;
+                } else {
+                    current_field = CurrentField::None;
                 }
             }
             Ok(Event::Eof) => break,

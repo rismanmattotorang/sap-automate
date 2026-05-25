@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: sap-automate
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+  - hpa.yaml
+  - networkpolicy.yaml
+  - poddisruptionbudget.yaml
+  # Provide your own real secret out-of-band; `secret.example.yaml`
+  # is included only as a template — do not deploy it as-is.
+
+# Reference images via the kustomize images list so overlays can
+# override per environment.
+images:
+  - name: ghcr.io/acme/sap-automate
+    newTag: latest
+
+commonLabels:
+  app.kubernetes.io/part-of: sap-automate
+  app.kubernetes.io/managed-by: kustomize
+
+configMapGenerator: []

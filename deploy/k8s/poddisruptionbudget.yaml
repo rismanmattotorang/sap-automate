@@ -1,0 +1,12 @@
+# Guarantee ≥ 2 server replicas always available during voluntary
+# disruptions (node drains, cluster upgrades, deployment rollouts).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sap-automate-server
+  namespace: sap-automate
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sap-automate-server

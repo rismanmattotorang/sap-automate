@@ -1,0 +1,9 @@
+target/
+node_modules/
+.next/
+.git/
+docs/web-screens/
+*.log
+*.tmp
+.env
+.env.local

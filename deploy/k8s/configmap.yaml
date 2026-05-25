@@ -1,0 +1,36 @@
+# Non-sensitive runtime configuration.
+# Secret material (passwords, API keys) lives in `secret.yaml` and is
+# mounted as environment variables in the Deployment.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sap-automate-config
+  namespace: sap-automate
+data:
+  # Server defaults.  Override per-environment via Kustomize overlays.
+  RUST_LOG: "info,sap_automate_server=info,mcp_server=info"
+  SAP_AUTOMATE_TRANSPORT: "http"
+  SAP_AUTOMATE_BIND: "0.0.0.0:3030"
+  SAP_AUTOMATE_POOL_SIZE: "16"
+  SAP_AUTOMATE_EMBEDDING_DIM: "256"
+
+  # AGENTS.md is mounted from this ConfigMap into the container so
+  # operators can change agent guardrails without rebuilding the image.
+  AGENTS.md: |
+    # Agent Guardrails — SAP-Automate (production)
+
+    ## Read-only by default
+    The cluster runs without `--enable-writes`. Tool catalogue exposes
+    only the read-only surface. Write workflows route through the
+    `sap-automate-gw` Deployment, which is started with `--enable-writes`
+    in the operator-only namespace.
+
+    ## Choose the right retrieval layer
+    L2 Hybrid (`sap.docs.search`) for default Q&A.
+    L3 GraphRAG (`kb.global_query`) for global / analytical queries.
+    L4 HippoRAG (`kb.multi_hop`) for impact / where-used / dependency.
+    L5 RAPTOR  (`kb.summarise`) for granularity-aware orientation.
+
+    ## Before any write
+    Confirm with the user via elicitation; never fabricate cost centres,
+    customer numbers, or transport IDs.

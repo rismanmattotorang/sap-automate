@@ -1,0 +1,64 @@
+# Default-deny + allow-list pattern.  Anything not explicitly permitted
+# below is rejected.  Hardens the perimeter so a compromised pod can't
+# pivot to other namespaces or to the SAP system over an unexpected port.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sap-automate-server-deny-all
+  namespace: sap-automate
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sap-automate-server
+  policyTypes:
+    - Ingress
+    - Egress
+  # Ingress: only the namespace's own ingress-controller / gateway.
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              network/gateway: "true"
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: sap-automate-gw
+      ports:
+        - port: 3030
+          protocol: TCP
+  # Egress: DNS + SAP (32xx / 33xx / 443) + observability collector.
+  egress:
+    # Cluster DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # SAP NW gateway (configure CIDR per environment).
+    - to:
+        - ipBlock:
+            cidr: 10.0.0.0/8         # CHANGE THIS to the actual SAP CIDR
+      ports:
+        - port: 443                 # HTTPS / ADT REST
+          protocol: TCP
+        - port: 3300                # SAP gateway
+          protocol: TCP
+        - port: 3306                # SAP message server
+          protocol: TCP
+    # OTLP collector
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: otel-collector
+      ports:
+        - port: 4317
+          protocol: TCP

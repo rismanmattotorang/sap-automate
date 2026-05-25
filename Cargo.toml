@@ -77,7 +77,7 @@ ratatui = "0.28"
 crossterm = "0.28"
 
 # HTTP / web (Phase 1A)
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "cookies"] }
 url = "2"
 scraper = "0.20"
 sha2 = "0.10"

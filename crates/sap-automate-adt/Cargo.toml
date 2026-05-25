@@ -23,3 +23,9 @@ http = ["reqwest", "url", "quick-xml", "toml"]
 
 [dev-dependencies]
 tokio = { workspace = true }
+axum = { workspace = true }
+tower-http = { workspace = true }
+
+[[test]]
+name = "http_integration"
+required-features = ["http"]
