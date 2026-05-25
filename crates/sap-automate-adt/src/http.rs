@@ -32,8 +32,13 @@ use tokio::sync::RwLock;
 use tracing::{debug, warn};
 
 const CSRF_HEADER: &str = "x-csrf-token";
-const SAP_CLIENT_HEADER: &str = "sap-client";
-const SAP_LANGUAGE_HEADER: &str = "sap-language";
+// SAP convention: header name is X-SAP-Client (Pascal case) per the ADT
+// REST docs and confirmed in mario-andreschak/mcp-abap-adt and Eclipse
+// ADT client.  HTTP headers are case-insensitive on the wire, but real
+// SAP gateways have been observed to be case-sensitive in older releases
+// (NW 7.40 and earlier).  Use the canonical form for maximum compat.
+const SAP_CLIENT_HEADER: &str = "X-SAP-Client";
+const SAP_LANGUAGE_HEADER: &str = "X-SAP-Language";
 
 pub struct HttpAdtClient {
     destination: AdtDestination,
@@ -165,10 +170,38 @@ impl AdtClient for HttpAdtClient {
         })
     }
     async fn get_package_contents(&self, package: &str) -> AdtResult<PackageContents> {
-        let path = AbapObjectKind::Package.adt_path(package);
-        let body = self.fetch_text(&path).await?;
-        // ADT returns XML; minimal parse just enough to extract object names
-        // and descriptions.  A richer schema is left for Phase 2 finalisation.
+        // Per SAP ADT REST docs (confirmed in mario-andreschak/mcp-abap-adt
+        // handleGetPackage): the nodestructure endpoint takes form params,
+        // NOT a query string, and the HTTP method is POST.
+        //
+        //   POST /sap/bc/adt/repository/nodestructure
+        //   parent_type=DEVC%2FK&parent_name=<package>&withShortDescriptions=true
+        let url = self.url("/sap/bc/adt/repository/nodestructure");
+        let mut headers = self.base_headers()?;
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            HeaderValue::from_static("application/x-www-form-urlencoded"),
+        );
+        let form = format!(
+            "parent_type=DEVC%2FK&parent_name={}&withShortDescriptions=true",
+            urlencoding::encode(package),
+        );
+        let resp = self.http.post(&url).headers(headers).body(form).send().await
+            .map_err(|e| AdtError::DestinationDown {
+                destination: self.destination.name.clone(),
+                reason: e.to_string(),
+            })?;
+        let status = resp.status();
+        if status == 401 || status == 403 {
+            return Err(AdtError::Forbidden(format!("nodestructure -> {status}")));
+        }
+        if status == 404 {
+            return Err(AdtError::NotFound { kind: "Package".into(), name: package.into() });
+        }
+        if !status.is_success() {
+            return Err(AdtError::Internal(format!("nodestructure -> {status}")));
+        }
+        let body = resp.text().await.map_err(|e| AdtError::Internal(e.to_string()))?;
         let members = parse_nodestructure(&body);
         Ok(PackageContents {
             package: package.to_uppercase(),
@@ -197,11 +230,46 @@ impl AdtClient for HttpAdtClient {
     }
 
     async fn where_used(&self, request: WhereUsedRequest) -> AdtResult<Vec<WhereUsedHit>> {
-        // ADT's where-used endpoint requires a context URI; full wiring
-        // is Phase 2 finalisation.  For now we return an empty list and
-        // log a warning so agents fall back to RAG-based search.
-        warn!(name = %request.name, kind = ?request.kind, "HttpAdtClient: where-used wiring deferred to Phase 2 finalisation");
-        Ok(Vec::new())
+        // SAP ADT usageReferences endpoint (confirmed Eclipse ADT client):
+        //   POST /sap/bc/adt/repository/informationsystem/usageReferences?uri=<obj-uri>
+        //   Content-Type: application/vnd.sap.adt.repository.usagereferences.request+xml
+        //
+        // The body lists the affected scopes; an empty <usageReferences>
+        // element is interpreted as "all scopes the user can access".
+        let obj_uri = request.kind.adt_path(&request.name);
+        let url = format!(
+            "{}/sap/bc/adt/repository/informationsystem/usageReferences?uri={}",
+            self.destination.base_url.trim_end_matches('/'),
+            urlencoding::encode(&obj_uri),
+        );
+        let mut headers = self.base_headers()?;
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            HeaderValue::from_static("application/vnd.sap.adt.repository.usagereferences.request+xml"),
+        );
+        headers.insert(
+            ACCEPT,
+            HeaderValue::from_static("application/vnd.sap.adt.repository.usagereferences.result+xml"),
+        );
+        let body = r#"<?xml version="1.0" encoding="UTF-8"?>
+<usageReferences:usageReferenceRequest xmlns:usageReferences="http://www.sap.com/adt/ris/usageReferences">
+  <usageReferences:affectedObjects/>
+</usageReferences:usageReferenceRequest>"#;
+        let resp = self.http.post(&url).headers(headers).body(body).send().await
+            .map_err(|e| AdtError::DestinationDown {
+                destination: self.destination.name.clone(),
+                reason: e.to_string(),
+            })?;
+        let status = resp.status();
+        if status == 404 {
+            warn!(name = %request.name, kind = ?request.kind, "where_used: object not found");
+            return Ok(Vec::new());
+        }
+        if !status.is_success() {
+            return Err(AdtError::Internal(format!("usageReferences -> {status}")));
+        }
+        let text = resp.text().await.map_err(|e| AdtError::Internal(e.to_string()))?;
+        Ok(parse_usage_references(&text, request.kind))
     }
 
     async fn get_table_contents(&self, table: &str, max_rows: usize) -> AdtResult<Vec<TableRow>> {
@@ -370,6 +438,52 @@ fn parse_data_preview(_text: &str) -> Vec<TableRow> {
     // parser is Phase 2 finalisation; for now we return empty so callers
     // know to inspect the raw body via a future `raw=true` flag.
     Vec::new()
+}
+
+/// Parse the `usageReferences:result` XML returned by the ADT
+/// `usageReferences` endpoint.  Each `<referencedObject>` element carries
+/// an `adtcore:name`, an `adtcore:type`, and an `adtcore:uri` we map back
+/// to our domain.
+fn parse_usage_references(xml: &str, _from_kind: AbapObjectKind) -> Vec<WhereUsedHit> {
+    use quick_xml::events::Event;
+    use quick_xml::Reader;
+    let mut out = Vec::new();
+    let mut reader = Reader::from_str(xml);
+    let mut buf = Vec::new();
+    let mut cur_name: String = String::new();
+    let mut cur_type: String = String::new();
+    let mut cur_uri:  String = String::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Empty(e)) | Ok(Event::Start(e)) => {
+                if e.name().as_ref().ends_with(b"referencedObject")
+                    || e.name().as_ref().ends_with(b"objectReference")
+                {
+                    cur_name.clear(); cur_type.clear(); cur_uri.clear();
+                    for attr in e.attributes().flatten() {
+                        let key = String::from_utf8_lossy(attr.key.as_ref()).into_owned();
+                        let val = attr.unescape_value().unwrap_or_default().into_owned();
+                        if key.contains("name") { cur_name = val; }
+                        else if key.contains("type") { cur_type = val; }
+                        else if key.contains("uri")  { cur_uri  = val; }
+                    }
+                    if !cur_name.is_empty() {
+                        out.push(WhereUsedHit {
+                            object: cur_name.clone(),
+                            kind: map_kind(&cur_type),
+                            location: cur_uri.clone(),
+                            usage: "reference".into(),
+                        });
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    out
 }
 
 fn map_kind(token: &str) -> AbapObjectKind {

@@ -60,9 +60,20 @@ impl AbapObjectKind {
             Self::FunctionGroup => format!("/sap/bc/adt/functions/groups/{n}/source/main"),
             Self::FunctionModule => format!("/sap/bc/adt/functions/groups/{{group}}/fmodules/{n}/source/main"),
             Self::Table => format!("/sap/bc/adt/ddic/tables/{n}/source/main"),
+            Self::Structure => format!("/sap/bc/adt/ddic/structures/{n}/source/main"),
+            Self::DataElement => format!("/sap/bc/adt/ddic/dataelements/{n}"),
+            Self::Domain => format!("/sap/bc/adt/ddic/domains/{n}/source/main"),
             Self::CdsView => format!("/sap/bc/adt/ddic/ddl/sources/{n}/source/main"),
-            Self::Package => format!("/sap/bc/adt/repository/nodestructure?parent_name={n}&parent_type=DEVC%2FK"),
-            _ => format!("/sap/bc/adt/repository/informationsystem/objectproperties/values?uri=/sap/bc/adt/{}", name),
+            // Package nodestructure is POST not GET (see http.rs); the
+            // path here is just the base URL.
+            Self::Package => "/sap/bc/adt/repository/nodestructure".to_string(),
+            Self::Transaction => format!(
+                "/sap/bc/adt/repository/informationsystem/objectproperties/values?uri=%2Fsap%2Fbc%2Fadt%2Fvit%2Fwb%2Fobject_type%2Ftrant%2Fobject_name%2F{n}",
+            ),
+            Self::EnhancementSpot
+            | Self::BehaviorDefinition
+            | Self::ServiceDefinition
+            | Self::MetadataExtension => format!("/sap/bc/adt/objects/{n}"),
         }
     }
 }
