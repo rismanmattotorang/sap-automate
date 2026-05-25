@@ -138,3 +138,165 @@ pages by intent"*) is satisfied at pilot scale.
 
 Phase 1A trait surfaces (`KnowledgeStore`, `EmbeddingClient`,
 `IngestionPipeline`) are stable; Phase 2 lands without touching them.
+
+---
+
+# Post-v1.0 Forward Plan
+
+> **v1.0.0 is the foundation, not the finish line.**  All paper phases (P1–P9) are complete; the codebase has 104 tests passing, sub-millisecond P95 retrieval, production K8s manifests, and a polished agentic surface.  Everything below is what we build *next*, anchored to the four strategic themes that turn this project from "best-in-class open source" into "the category-defining SAP-agent platform".
+
+## v1.0.0 — state of the union (released 2026-05-25)
+
+| Surface | Status | Notes |
+|---|---|---|
+| MCP protocol (2025-06-18) | ✅ complete | tools, resources, prompts, structured elicitation, all wire-format compliant |
+| MCP server (stdio + HTTP/SSE) | ✅ production | split reader/writer, cancellation-safe, exposure-policy gated |
+| MCP client | ✅ production | typed wrappers, elicitation delegate, split-half spawn |
+| SAP backend traits | ✅ stable | `SapClient`, `AdtClient`, `KnowledgeStore`, `EmbeddingClient`, `Reranker`, `ChannelAdapter`, `AuditSink` |
+| Real SAP wiring | 🟡 partial | `HttpAdtClient` complete (17 integration tests); `NetweaverSapClient` is the next mock to replace |
+| RAG: hybrid + GraphRAG + HippoRAG + RAPTOR | ✅ production | P95 0.16 ms / 0.08 ms — orders under the paper's gates |
+| Agentic layer (memory + scheduler + channels) | ✅ architecture | CLI channel live; Teams / Slack / Telegram trait-skeletons |
+| Observability | 🟡 partial | Prometheus `/metrics` shipped; OTLP exporter behind feature flag; Grafana dashboard JSONs queued |
+| Deployment | ✅ ready | Multi-stage distroless Dockerfile, 9 hardened K8s manifests, Kustomize, runbook |
+| CI/CD | ✅ production | GitHub Actions: fmt, clippy, stable+beta test matrix, SAP-precision gate, P95 gate, cargo-audit, Docker build, K8s lint, Next.js web build, release pipeline (multi-arch GHCR) |
+| Security | 🟡 partial | Read-only by default, audit log + redaction, structured error taxonomy.  OAuth 2.1 / mTLS / pen-test remain for v1.2 |
+
+## Strategic themes for the next 12 months
+
+The four product themes for v1.1 through v2.0:
+
+1. **Real-world wiring** — replace every mock backend with a live integration test against a real SAP / Qdrant / ArangoDB / Postgres.
+2. **Enterprise security** — OAuth 2.1, XSUAA service-key, mTLS, SBOM, cosigned containers, third-party pen-test.
+3. **Agent intelligence** — LLM router, reflection loop, sub-agent runtime, real ONNX cross-encoder, contextual enrichment via prompt-cached LLM call.
+4. **Ecosystem reach** — Microsoft Teams / Slack / Telegram / WhatsApp real adapters, public docs site, sample agent libraries, ParagonCorp Skill Commons.
+
+## Versioned milestones
+
+### v1.1 — Live SAP wiring  (target Q3 2026, ~6 weeks)
+
+Replace mocks with real backends so the *demo* runs against the *real thing*.
+
+- `NetweaverSapClient` against a published SAP sandbox (e.g. ES5 / BTP trial), behind a `netweaver` feature flag.  17+ integration tests modelled on the existing ADT suite.
+- `HttpAdtClient` end-to-end test against an actual ABAP Cloud trial; CSRF token rotation under load.
+- `QdrantStore` integration tests against a containerised Qdrant in CI.
+- `OpenAiEmbedder` + `voyage` embedder backends in CI behind secrets-gated jobs.
+- Postgres `DocumentStore` (currently in-memory) with `sqlx` migrations.
+- ArangoDB `GraphStore` (currently `InMemoryGraph`) — full schema, AQL queries.
+- **Acceptance gate:** end-to-end agent query *"investigate why FI period 2026-M03 didn't close"* runs against the sandbox, returns a cited answer with a real ACDOCA snippet and a real ATC reading.
+
+### v1.2 — Enterprise security hardening  (Q4 2026, ~8 weeks)
+
+Paper §X-J completed.
+
+- **OAuth 2.1 with PKCE** for the HTTP transport (RFC 6749 / 7636).
+- **XSUAA service-key** auth for SAP BTP (the `AdtAuth::ServiceKey` variant fully wired).
+- **mTLS** support for both transports (server-side cert + optional client cert verification).
+- **External Secrets Operator** integration documented end-to-end (Vault / AWS SM / Azure KV examples).
+- **Audit log sinks**: Loki, S3 with object lock, Splunk HEC, Azure Monitor.
+- **SBOM** generation (CycloneDX) embedded in every release.
+- **Cosign-signed** container images + GitHub provenance attestations (SLSA Level 3).
+- **Third-party pen-test** by an external SAP-focused firm; remediation tracked in `docs/SECURITY_REVIEW.md`.
+- **Compliance posture document** (`docs/COMPLIANCE.md`): GDPR Article 30 records-of-processing, SOX evidence trail for FI postings, retention policy.
+
+### v1.3 — Observability finalisation  (Q4 2026 in parallel, ~3 weeks)
+
+Make the operator experience production-grade.
+
+- **OpenTelemetry OTLP exporter** wired into `apps/sap-automate-server` behind the `otlp` feature flag.  Spans propagate through every layer: MCP session → tool → SAP backend → KB / graph.
+- **Grafana dashboard JSONs** shipped under `deploy/grafana/`: latency budget, error rate, pool saturation, scheduler health, channel throughput.
+- **SLI / SLO YAML** declarations (the Pyrra format).
+- **Alertmanager rules** for the paper §X-D / §X-H gates: alert when P95 retrieval exceeds 80 ms or multi-hop exceeds 400 ms.
+- **Continuous benchmarks** in CI (`cargo-criterion`) with regression detection against `main`.
+
+### v1.4 — Real channel adapters  (Q1 2027, ~8 weeks)
+
+The trait surface is stable; this lights up the actual user-facing channels.
+
+- **Microsoft Teams** (Bot Framework SDK + Adaptive Cards).
+- **Slack** (Bolt SDK + Block Kit).
+- **Telegram** (webhook + Bot API).
+- **WhatsApp Business Cloud API**.
+- **Email** (IMAP receive + SMTP send via `lettre`).
+- **Hermes-Agent pairing flow** — channel user ↔ MCP session binding with mTLS or signed-cookie session tokens.
+- **Per-channel idempotency** (the gateway de-duplicates retried webhooks).
+
+### v1.5 — Agent intelligence  (Q1 2027, ~10 weeks)
+
+Replace the current keyword-based intent router with LLM-driven reasoning.
+
+- **`LlmRouter` trait** + reference implementations against Claude, GPT, Gemini, local Llama via `llama.cpp`.
+- **Reflection loop** (paper §IX-B P3-self-improvement): trajectory capture → LLM critique → memory consolidation into episodic store.
+- **Sub-agent runtime** (paper §IX-B): contained child agents share the parent's MCP surface but with restricted exposure policies.
+- **Skill Commons** (paper §X-L): private registry at `commons.paragoncorp.example` for signed, code-reviewed skills.  Skills carry an Ed25519 signature; unsigned skills refuse to load in production deployments.
+- **Streaming responses** through the HTTP/SSE transport (`notifications/progress` per MCP 2025-06-18) so the web UI renders tokens as they arrive.
+
+### v1.6 — Multi-tenancy + multi-system  (Q2 2027, ~6 weeks)
+
+- **Per-tenant KBs** (`KnowledgeStore` already takes a tenant scope; wire end-to-end).
+- **Per-tenant skill libraries** (`SkillRegistry` accepts a tenant filter).
+- **Quota enforcement** at the tool-call boundary (req/s, tokens/min).
+- **BTP Destination service** lookup as a runtime backend for `AdtDestination`.
+- **Multi-SID** support: one server instance serves multiple SAP systems via a `--system <SID>` request header.
+
+### v1.7 — Advanced retrieval  (Q2 2027 in parallel, ~6 weeks)
+
+- **ColBERT late-interaction** retrieval (paper §VII-C) — measurable precision lift on ABAP-identifier queries.
+- **SPLADE sparse encoder** (paper §X-E) for code corpora — replaces BM25 on the ABAP collection.
+- **Real ONNX cross-encoder reranker** (`bge-reranker-large`, `flashrank/MS-MARCO-MiniLM`) wired through `ort` crate; the `MockReranker` becomes the offline fallback only.
+- **Contextual chunk enrichment via LLM** with prompt caching (paper §VII-D + §X-N risk-2) — replaces the current extractive heuristic.
+
+### v2.0 — Adjacent SAP surfaces  (H2 2027, ~3 months)
+
+A major release that broadens beyond S/4HANA core.
+
+- **SAP Datasphere** connector (analytics + governance APIs).
+- **SAP Cloud Integration (CPI)** iFlow management adapter.
+- **SAP Cloud ALM** bridge for incident + change correlation.
+- **SAP Build / Joule Studio** export — generate Joule-compatible skill packages from SAP-Automate skills, opening a migration path *into* SAP-Automate from Joule deployments.
+- **SAP BTP destination-service** native integration.
+- **OData v2/v4 generic proxy** — point at any OData metadata URL, get an MCP tool surface for free (the `marianfoo/sap-ai-mcp-servers` convergent pattern).
+
+## Ongoing tracks
+
+Three tracks run continuously alongside the versioned milestones:
+
+- **Operational maturity**
+  - Helm chart with dev/staging/prod overlays (currently Kustomize only).
+  - ArgoCD / Flux GitOps templates.
+  - Terraform modules for AWS / Azure / GCP.
+  - Backup + restore runbook for the Postgres / Qdrant / ArangoDB tier.
+  - Cost-optimisation tooling — local `bge-m3` embedder backend as the default when no OpenAI key is configured, per paper §X-N risk-2.
+
+- **Community + ecosystem**
+  - Public docs site (mdBook) with API reference + tutorials + recipe cookbook.
+  - Sample agent libraries for Claude Code, ChatGPT Custom GPTs, LangChain, AutoGen, CrewAI.
+  - Discord + GitHub Discussions.
+  - `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`.
+  - Public Skill Commons (curated, code-reviewed skills with Ed25519 signatures).
+  - Quarterly "what's new" video.
+  - Conference circuit (SAP TechEd, SAP Sapphire, KubeCon, RustConf).
+
+- **Research feedback loop**
+  - Benchmark against named market alternatives (Joule, CData, the 6 reference projects) using paper §XII methodology — publish results quarterly.
+  - Track which retrieval layer (L2/L3/L4/L5) the agent actually picks in production — feeds the next iteration of the router.
+  - Episodic-memory hit-rate measurement (paper §X-L gate of 8%) — informs skill-commons promotion.
+  - Continued whitepaper updates as the system evolves; ParagonCorp Technical Review Vol. 1 No. 2 planned for end of 2026.
+
+## What's explicitly NOT on the roadmap
+
+To keep the project focused:
+
+- ❌ A custom LLM.  We integrate with existing model providers; we do not train.
+- ❌ Vendor-locked deployment.  SAP-Automate stays infrastructure-agnostic; no AWS-only or Azure-only paths.
+- ❌ A graphical agent designer.  Skills authored in markdown remain the primary surface; UI tooling is *editing* skills, never *replacing* them.
+- ❌ Closed-source plugins.  Apache-2.0 across the board.
+
+## How to influence the roadmap
+
+- Open a GitHub issue tagged `roadmap` with a use case.
+- Vote on existing `roadmap` issues.
+- For enterprise customers: ParagonCorp accepts paid prioritisation under standard commercial terms — contact `tpo-research@paracorpgroup.com`.
+
+---
+
+*Reference design: PC-TR-2026-SAP-AUTOMATE-01.  Whitepaper: [`docs/SAPAutomate.pdf`](SAPAutomate.pdf).*
