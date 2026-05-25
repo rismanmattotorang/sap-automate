@@ -22,13 +22,22 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tracing::{info, warn};
 
+/// Type-erased Prometheus metrics renderer.  When set, the HTTP
+/// transport exposes a `/metrics` endpoint that calls this.
+pub type MetricsRenderFn = Arc<dyn Fn() -> String + Send + Sync + 'static>;
+
 /// Configuration for the HTTP transport.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct HttpServerConfig {
     pub bind: SocketAddr,
     /// Optional shared bearer token. When set, requests without
     /// `Authorization: Bearer <token>` are rejected.
     pub bearer_token: Option<String>,
+    /// When `Some`, GET `/metrics` calls this to render the Prometheus
+    /// text exposition.  The endpoint is always unauthenticated so
+    /// scrapers don't need to know the bearer token; production
+    /// deployments restrict the endpoint via NetworkPolicy.
+    pub metrics_renderer: Option<MetricsRenderFn>,
 }
 
 impl Default for HttpServerConfig {
@@ -36,6 +45,7 @@ impl Default for HttpServerConfig {
         Self {
             bind: "127.0.0.1:3030".parse().unwrap(),
             bearer_token: None,
+            metrics_renderer: None,
         }
     }
 }
@@ -76,10 +86,28 @@ impl HttpServerTransport {
             events: Mutex::new(EventBus::default()),
         });
 
+        let metrics_renderer = config.metrics_renderer.clone();
+        let metrics_route = get(move || {
+            let r = metrics_renderer.clone();
+            async move {
+                match r {
+                    Some(f) => (
+                        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+                        f(),
+                    ).into_response(),
+                    None => (
+                        axum::http::StatusCode::NOT_FOUND,
+                        "metrics endpoint not configured",
+                    ).into_response(),
+                }
+            }
+        });
+
         let app = Router::new()
             .route("/mcp", post(post_handler::<F, Fut>))
             .route("/mcp/events", get(events_handler::<F, Fut>))
             .route("/health", get(|| async { "ok" }))
+            .route("/metrics", metrics_route)
             .with_state(state);
 
         let listener = tokio::net::TcpListener::bind(config.bind).await

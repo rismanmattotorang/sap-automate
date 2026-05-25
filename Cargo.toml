@@ -16,6 +16,7 @@ members = [
     "crates/sap-automate-graph",
     "crates/sap-automate-scheduler",
     "crates/sap-automate-channels",
+    "crates/sap-automate-observability",
     "apps/sap-automate-server",
     "apps/sap-automate-ingest",
     "apps/sap-automate-bench",
@@ -68,6 +69,7 @@ sap-automate-adt = { path = "crates/sap-automate-adt" }
 sap-automate-graph = { path = "crates/sap-automate-graph" }
 sap-automate-scheduler = { path = "crates/sap-automate-scheduler" }
 sap-automate-channels = { path = "crates/sap-automate-channels" }
+sap-automate-observability = { path = "crates/sap-automate-observability" }
 axum = "0.7"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "cors"] }

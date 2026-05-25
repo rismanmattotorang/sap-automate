@@ -26,6 +26,7 @@ mod prompts;
 use clap::Parser;
 use mcp_server::Server;
 use mcp_transport::{HttpServerConfig, HttpServerTransport, StdioTransport};
+use sap_automate_observability::metrics::{MetricKind, MetricsRegistry};
 use sap_automate_adt::{AdtClient, AdtDestination, MockAdtClient};
 use sap_automate_graph::InMemoryGraph;
 use sap_automate_rag::GraphEngine;
@@ -189,15 +190,48 @@ async fn main() -> anyhow::Result<()> {
             let bind: std::net::SocketAddr = cli.bind.parse()
                 .map_err(|e| anyhow::anyhow!("invalid --bind '{}': {e}", cli.bind))?;
             tracing::info!(bind = %bind, "HTTP transport binding");
+
+            // Build the Prometheus metrics registry.  Names follow paper
+            // §IV-H (mcp_tool_latency_seconds, rag_retrieval_latency_seconds,
+            // sap_rfc_calls_total, sap_authz_denied_total).
+            let metrics = Arc::new(MetricsRegistry::new());
+            metrics.register("mcp_tool_latency_seconds", MetricKind::Histogram,
+                "Per-tool call latency in seconds (paper §X-D gate at 0.080s)");
+            metrics.register("mcp_tool_calls_total", MetricKind::Counter,
+                "Total MCP tool invocations");
+            metrics.register("mcp_tool_errors_total", MetricKind::Counter,
+                "Total MCP tool invocations that returned isError=true");
+            metrics.register("rag_retrieval_latency_seconds", MetricKind::Histogram,
+                "RAG retrieval latency (paper §X-D gate at 0.080s)");
+            metrics.register("kb_chunks_total", MetricKind::Gauge,
+                "Total chunks currently indexed");
+            metrics.register("sap_pool_in_use", MetricKind::Gauge,
+                "SAP connection pool slots currently in use");
+            metrics.register("sap_authz_denied_total", MetricKind::Counter,
+                "Calls denied by the read-only safety gate");
+            metrics.register("sap_rfc_calls_total", MetricKind::Counter,
+                "RFC calls dispatched to SAP, grouped by function and outcome");
+
+            let metrics_for_render = Arc::clone(&metrics);
+            let render: mcp_transport::http::MetricsRenderFn = Arc::new(move || {
+                metrics_for_render.render()
+            });
+
             let dispatch_server = server.clone();
             let handle = HttpServerTransport::serve(
-                HttpServerConfig { bind, bearer_token: cli.bearer_token.clone() },
+                HttpServerConfig {
+                    bind,
+                    bearer_token: cli.bearer_token.clone(),
+                    metrics_renderer: Some(render),
+                },
                 move |msg| {
                     let server = dispatch_server.clone();
                     async move { server.dispatch_message(msg).await }
                 },
             ).await?;
-            tracing::info!("HTTP server ready at http://{bind}/mcp  (events: /mcp/events)");
+            tracing::info!(
+                "HTTP server ready at http://{bind}/mcp  (events: /mcp/events, metrics: /metrics)"
+            );
             // Run until SIGINT
             tokio::signal::ctrl_c().await?;
             handle.shutdown().await;

@@ -1,0 +1,160 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-flight runs on the same ref when a new commit lands.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────
+  # Fast static checks — fail PRs early.
+  # ─────────────────────────────────────────────────────────────────────
+  fmt:
+    name: cargo fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: cargo clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets --features sap-automate-adt/http -- -D warnings
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Build + test on a matrix of toolchains.
+  # ─────────────────────────────────────────────────────────────────────
+  test:
+    name: cargo test (${{ matrix.rust }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [stable, beta]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.rust }}
+      - name: cargo test (workspace, all features)
+        run: cargo test --workspace --features sap-automate-adt/http --no-fail-fast
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Phase 7 SAP precision tests run dedicated so a failure is visible.
+  # ─────────────────────────────────────────────────────────────────────
+  sap-precision:
+    name: SAP correctness invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run sap-automate-rfc tests
+        run: cargo test -p sap-automate-rfc --lib -- tests::every_write_bapi_has_bapiret2_in_tables tests::every_write_bapi_requires_commit tests::every_rfc_has_at_least_one_authorization_entry tests::every_table_has_client_as_first_key tests::material_number_is_char_40_per_s4hana tests::acdoca_is_present_and_marked_as_universal_journal tests::compatibility_views_carry_s4hana_storage_note
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Phase 3 acceptance gate: P95 retrieval < 80 ms.
+  # ─────────────────────────────────────────────────────────────────────
+  bench-gate:
+    name: P95 retrieval acceptance gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --bin sap-automate-bench
+      - name: Hybrid + Graph bench
+        run: ./target/release/sap-automate-bench --n 1000 --graph
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Security audit (cargo-audit).
+  # ─────────────────────────────────────────────────────────────────────
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    continue-on-error: true  # Advisory; do not block PRs on transitive deps.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install --locked cargo-audit
+      - run: cargo audit --deny warnings
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Docker image build (verify the deploy/Dockerfile is current).
+  # ─────────────────────────────────────────────────────────────────────
+  docker-build:
+    name: Docker image build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build (do not push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./deploy/Dockerfile
+          push: false
+          tags: sap-automate:ci-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Validate Kubernetes manifests.
+  # ─────────────────────────────────────────────────────────────────────
+  k8s-lint:
+    name: Kubernetes manifest lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up kubeconform
+        run: |
+          wget -q https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar xzf kubeconform-linux-amd64.tar.gz
+          sudo mv kubeconform /usr/local/bin/
+      - name: Lint manifests (skip the secret template — it's documentation)
+        run: |
+          find deploy/k8s -name '*.yaml' -not -name 'secret.example.yaml' -not -name 'kustomization.yaml' \
+            -print -exec kubeconform -strict -summary -ignore-missing-schemas {} \;
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Web UI (Next.js): typecheck + build.
+  # ─────────────────────────────────────────────────────────────────────
+  web:
+    name: Next.js web UI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npx next build

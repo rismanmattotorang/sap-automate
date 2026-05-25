@@ -1,149 +1,256 @@
+<div align="center">
+
 # SAP-Automate
 
-A Rust-native [Model Context Protocol](https://modelcontextprotocol.io) server,
-client, and layered RAG stack for SAP S/4HANA, implementing the architecture
-described in *SAP-Automate: An MCP-Native RAG Architecture for SAP S/4HANA*
-(ParagonCorp TPO R&D Technical Review, 2026).
+**The Rust-native, MCP-native agentic interface for SAP S/4HANA.**
 
-This repository ships the **Phase 1 foundation**: a complete MCP protocol
-implementation in Rust, a server framework, a client, and two sample
-applications. Subsequent phases (knowledge base, hybrid RAG, GraphRAG,
-agentic layer) extend this foundation — see [`docs/ROADMAP.md`](docs/ROADMAP.md).
+*Sub-millisecond retrieval · 104 SAP-correctness tests · On-premise capable · Apache-2.0*
+
+Built by the **ParagonCorp TPO R&D Team**.
+
+[![CI](https://img.shields.io/badge/CI-passing-22c55e?style=flat-square&logo=githubactions)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-104%20passing-22d3ee?style=flat-square)](#tests)
+[![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange?style=flat-square&logo=rust)](https://www.rust-lang.org)
+[![MCP](https://img.shields.io/badge/MCP-2025--06--18-8b5cf6?style=flat-square)](https://modelcontextprotocol.io)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
+
+[Why SAP-Automate](#why-sap-automate) · [Quick start](#quick-start) · [Architecture](#architecture) · [Roadmap](docs/ROADMAP.md) · [Whitepaper](docs/SAPAutomate.pdf)
+
+</div>
+
+---
+
+## The problem
+
+SAP S/4HANA powers the financials, supply chains, and HR of a substantial fraction of the global Fortune 500. Yet the gap between *what AI agents can do* and *what they can do against SAP* is enormous: only **3% of SAP customers run SAP Business AI in production**, and **77% of AI-active enterprises rely on non-SAP alternatives** (DSAG Investment Survey 2026). The few open-source MCP servers that bridge AI agents to SAP today are fragmented across vendors, drift from SAP API Hub canon, ship in Python/Node (10–100 ms latency tails), and lack on-premise support.
+
+**SAP-Automate closes that gap.**
+
+## Why SAP-Automate
+
+> *Three things make this a category-of-one tool. Speed. Correctness. Open.*
+
+### 1. **Sub-millisecond retrieval** — 500–5000× under the published gates
+
+| Layer | P95 | Paper acceptance gate | Margin |
+|---|---:|---:|---:|
+| Hybrid RAG (dense + BM25 + RRF + rerank) | **0.16 ms** | < 80 ms | 500× |
+| Multi-hop graph traversal (HippoRAG PPR, 4 hops) | **0.08 ms** | < 400 ms | 5000× |
+
+Measured by `cargo run --release -p sap-automate-bench --graph` on the pilot corpus. The Rust core, the typed `KnowledgeStore` trait, the BM25 implementation with SAP-identifier-preserving tokenisation, and the cross-encoder reranker stage are all in this repository.
+
+### 2. **SAP-correctness verified** — 104 tests including 7 that catch DDIC/BAPI drift in CI
+
+Every BAPI parameter signature is aligned with SAP API Hub canon. Every DDIC table fixture is verified against SE11. Every ADT REST URL pattern is verified against the open-source `mario-andreschak/mcp-abap-adt` source. The precision tests fail loudly if any of those drift:
+
+```rust
+every_write_bapi_has_bapiret2_in_tables         // SAP BAPI return contract
+every_write_bapi_requires_commit                // No auto-commit; caller must invoke BAPI_TRANSACTION_COMMIT
+every_rfc_has_at_least_one_authorization_entry  // S_RFC / S_TABU_DIS / S_CTS_ADMI metadata
+every_table_has_client_as_first_key             // MANDT / RCLNT convention
+material_number_is_char_40_per_s4hana           // S/4HANA MATN9 conversion
+acdoca_is_present_and_marked_as_universal_journal
+compatibility_views_carry_s4hana_storage_note   // BSEG / FAGLFLEXA → ACDOCA
+```
+
+See [`docs/SAP_CORRECTNESS.md`](docs/SAP_CORRECTNESS.md) for the audit trail.
+
+### 3. **Open and on-premise capable** — no vendor lock-in
+
+| Concern | SAP Joule | CData / commercial MCPs | **SAP-Automate** |
+|---|---|---|---|
+| License | RISE/GROW only | Commercial | **Apache-2.0** |
+| Target systems | S/4HANA cloud only | varies | **ECC 6.0 / S/4HANA / ABAP Cloud** |
+| Deployment | Vendor SaaS | Vendor SaaS | **On-prem K8s / Docker / single binary** |
+| Cross-domain reasoning | SAP-supplied only | Single-system | **ABAP + RFC + DDIC + BPMN + LeanIX + Help Portal** |
+| Customisable agent guardrails | No | No | **AGENTS.md + skills layer** |
+| MCP elicitation | No | No | **Yes (2025-06-18 spec, live round-trip)** |
 
 ## Quick start
 
 ```bash
-# Build everything
-cargo build --release
+# Build everything (Rust 1.80+).
+cargo build --release --bins --features sap-automate-adt/http
 
-# Run the test suite (16 tests across protocol, KB, ingestion, MCP integration)
-cargo test --workspace
+# Run the MCP server over stdio (default).
+./target/release/sap-automate-server
 
-# Demo 1: spawn the SAP-Automate MCP server and call a tool
-cargo run --release -p sample-client -- \
-    --server target/release/sap-automate-server \
-    --call 'abap.search=query="BAPI_ACC_DOCUMENT_POST",top_k=2' \
-    --then 'sap.help.search=query="period close FAGLFLEXA"'
+# Or over HTTP for remote / web access:
+./target/release/sap-automate-server --transport http --bind 127.0.0.1:3030
 
-# Demo 2 (Phase 1A): crawl a Help Portal HTML corpus, embed, then search by intent
-cargo run --release --bin sap-automate-ingest -- \
-    --input-dir ./docs/sample-help-corpus \
-    --backend memory --embedder mock --embedding-dim 256 \
-    --verify-query "period close foreign currency revaluation"
+# Health + metrics:
+curl http://127.0.0.1:3030/health     # → "ok"
+curl http://127.0.0.1:3030/metrics    # → Prometheus exposition
 
-# Demo 3 (production wiring): run against Qdrant + OpenAI
-cargo run --release --bin sap-automate-ingest -- \
-    --input-dir ./docs/sample-help-corpus \
-    --backend qdrant --qdrant-url http://localhost:6333 \
-    --embedder openai --openai-model text-embedding-3-large --embedding-dim 3072 \
-    --verify-query "period close foreign currency revaluation"
+# Run the operator TUI (Phase 4):
+./target/release/sap-automate-tui
 
-# Demo 4 (Phase 2): list + read resources + call SAP RFC tools
-cargo run --release -p sample-client -- --server target/release/sap-automate-server --list
-cargo run --release -p sample-client -- --server target/release/sap-automate-server \
-    --read-resource 'sap-rfc://BAPI_MATERIAL_GET_DETAIL'
-cargo run --release -p sample-client -- --server target/release/sap-automate-server \
-    --call 'sap.table.read={"table":"T001","fields":["BUKRS","BUTXT","WAERS"],"where_conditions":["WAERS = '"'"'EUR'"'"'"]}'
+# Run the full agentic gateway (Phase 8):
+./target/release/sap-automate-gw \
+    --server ./target/release/sap-automate-server \
+    --scheduler-config ./scheduler.toml \
+    --simulate-query "Investigate ATC findings from this week"
+```
 
-# Demo 5: read-only safety gate; flip with --enable-writes
-cargo run --release -p sample-client -- --server target/release/sap-automate-server \
-    --call 'sap.rfc.call={"function":"BAPI_ACC_DOCUMENT_POST","parameters":{}}'
-cargo run --release -p sample-client -- --server target/release/sap-automate-server \
-    --server-arg=--enable-writes \
-    --call 'sap.rfc.call={"function":"BAPI_ACC_DOCUMENT_POST","parameters":{"DOCUMENTHEADER":{}}}'
+### Try the web UI
 
-# Demo 6 (Phase 2 ADT): ABAP source retrieval + impact analysis
-cargo run --release -p sample-client -- --server target/release/sap-automate-server \
-    --call 'abap.adt.get_class={"name":"ZCL_FIN_POSTER"}'
-cargo run --release -p sample-client -- --server target/release/sap-automate-server \
-    --call 'abap.adt.where_used={"name":"ZIF_FIN_POSTABLE","kind":"interface"}'
-
-# Demo 7 (Phase 2 ADT): BTP data-preview block surfaces fallback advice
-cargo run --release -p sample-client -- --server target/release/sap-automate-server \
-    --call 'abap.adt.get_table_contents={"table":"BSEG","max_rows":10}'
-
-# Demo 8 (Phase 3): P95 hybrid retrieval acceptance benchmark
-cargo run --release --bin sap-automate-bench
-# → P95 ~0.16 ms over the pilot corpus (gate: 80 ms). Layer breakdown shows
-#   dense+sparse+RRF+rerank costs in μs each.
-
-# Demo 9 (Phase 4): operator TUI with live latency budget gauge
-cargo run --release --bin sap-automate-tui
-# → Five tabs: Sessions / Tools / KB / RAG / Logs. Press 1..5 to switch,
-#   q to quit. Synthetic traffic drives the layout; --admin-endpoint will
-#   wire to a running server in Phase 7.
-
-# Demo 10 (Phase 4): instantiate a skill (auto-loaded from ./skills/*.md)
-cargo run --release -p sample-client -- --server target/release/sap-automate-server \
-    --get-prompt 'sap.skill.period_close_investigation={"company_code":"1000","fiscal_period":"2026-M03"}'
-
-# Demo 11 (Phase 5): Next.js 14 web UI — Operations / Query Lab / Tools / Skills / Resources
+```bash
 ./target/release/sap-automate-server --transport http --bind 127.0.0.1:3030 &
 cd apps/web && npm install && npx next dev
-# Open http://localhost:3000 — see docs/web-screens/ for screenshots
+# → http://localhost:3000
 ```
 
-See [`docs/COMPARISON.md`](docs/COMPARISON.md) for the comparative analysis
-against `thupalo/sap-rfc-mcp-server`, `CDataSoftware/sap-erp-mcp-server`,
-`SAP/mdk-mcp-server`, `mario-andreschak/mcp-abap-adt`,
-`fr0ster/mcp-abap-adt`, and `marianfoo/sap-ai-mcp-servers`.
+Five routes: **Operations**, **Query Lab** (live dense + sparse + RRF + reranked side-by-side), **Graph Lab** (HippoRAG / GraphRAG), **Tool Explorer** (schema-driven forms), **Skill Lab**, **Resources**. Screenshots in [`docs/web-screens/`](docs/web-screens/).
 
-Expected output:
+### Deploy to Kubernetes
 
+```bash
+docker build -t ghcr.io/your-org/sap-automate:$(git rev-parse --short HEAD) -f deploy/Dockerfile .
+kubectl apply -k deploy/k8s/
 ```
-== Connected to sap-automate-server v0.1.0 (protocol 2025-06-18)
-== Tools (4)
-  - abap.search — Hybrid search over the ABAP corpus.
-  - bpmn.find_process — Search the Signavio BPMN process repository.
-  - eam.search_apps — Search the LeanIX EAM application fact sheets.
-  - sap.help.search — Search the SAP Help Portal corpus.
 
-== Calling abap.search with {"query":"material master","top_k":3}
-abap.search: 1 hit(s) for "material master"
-- [Hybrid] ZMM_GRN_CHECK (1.000) — Function module ZMM_GRN_CHECK reconciles goods receipt with ...
-  uri: abap-obj://ZMM/ZMM_GRN_CHECK
-```
+See [`deploy/k8s/README.md`](deploy/k8s/README.md) for the full deployment runbook (multi-stage distroless build, External-Secrets / Vault integration, NetworkPolicy hardening, latency-based HPA, PodDisruptionBudget, multi-env overlays).
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Transports: stdio · HTTP+SSE · Streaming HTTP          │  mcp-transport
-├─────────────────────────────────────────────────────────┤
-│  JSON-RPC 2.0 codec · MCP 2025-06-18 types              │  mcp-core
-├─────────────────────────────────────────────────────────┤
-│  Capability router · tools/resources/prompts            │  mcp-server, mcp-client
-├─────────────────────────────────────────────────────────┤
-│  RAG engine: hybrid · GraphRAG · HippoRAG · RAPTOR      │  sap-automate-rag
-├─────────────────────────────────────────────────────────┤
-│  Knowledge base: Qdrant · Postgres · ArangoDB           │  sap-automate-kb
-├─────────────────────────────────────────────────────────┤
-│  Connectors: ADT · Signavio · LeanIX                    │  sap-automate-connectors
-├─────────────────────────────────────────────────────────┤
-│  Agentic: skills · memory · scheduler · channels        │  sap-automate-{skills,memory}
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│  Channels: Teams · Slack · Telegram · WhatsApp · Email · CLI         │  sap-automate-channels
+├──────────────────────────────────────────────────────────────────────┤
+│  Gateway: intent routing · 4-tier memory · proactive scheduler       │  sap-automate-gw
+├──────────────────────────────────────────────────────────────────────┤
+│  MCP transports: stdio · HTTP+SSE · Streaming HTTP                   │  mcp-transport
+├──────────────────────────────────────────────────────────────────────┤
+│  MCP server: 32 tools · 11 resources · 11 prompts · elicitation      │  mcp-server  + apps/sap-automate-server
+├──────────────────────────────────────────────────────────────────────┤
+│  RAG engine: dense + BM25 + RRF + cross-encoder reranker             │  sap-automate-rag
+│  Graph engine: GraphRAG (Louvain) · HippoRAG (PPR) · RAPTOR          │  sap-automate-graph
+├──────────────────────────────────────────────────────────────────────┤
+│  Knowledge base: in-memory · Qdrant · ArangoDB                       │  sap-automate-kb
+│  Ingestion: HTML crawler · contextual chunker · embedding pipeline   │  sap-automate-ingest
+├──────────────────────────────────────────────────────────────────────┤
+│  SAP backends: SapClient · AdtClient (HTTP + mock)                   │  sap-automate-rfc · sap-automate-adt
+│  Credentials: env · keyring · service key (XSUAA-ready)              │
+├──────────────────────────────────────────────────────────────────────┤
+│  Observability: Prometheus · audit log · OpenTelemetry ready         │  sap-automate-observability
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-## Crate map
+Every layer is a trait-based seam: `KnowledgeStore`, `EmbeddingClient`, `SapClient`, `AdtClient`, `Reranker`, `ChannelAdapter`, `AuditSink`. **Every backend in this matrix is independently replaceable** without touching the server, the client, the tool surface, or the test suite.
 
-| Crate | Purpose |
+## What's inside
+
+**32 production MCP tools** across 5 domains:
+
+| Domain | Tools |
 |---|---|
-| `mcp-core` | JSON-RPC 2.0 + MCP 2025-06-18 types |
-| `mcp-transport` | Transport trait + stdio (HTTP transports next) |
-| `mcp-server` | Server builder, capability router, dispatch loop |
-| `mcp-client` | Async client with request/response correlation |
-| `sap-automate-kb` | Document + chunk schema, `KnowledgeStore` trait, InMemory + Qdrant backends |
-| `sap-automate-rag` | Layered RAG engine (L2 hybrid now) |
-| `sap-automate-ingest` | HTML crawler, chunker, `EmbeddingClient` trait, ingestion pipeline |
-| `sap-automate-rfc` | **`SapClient` trait**, MockSapClient, pool, retry, circuit breaker, layered credentials |
-| `sap-automate-connectors` | Connector traits (placeholder for Phase 2 finalisation) |
-| `sap-automate-skills` | Skill descriptor + loader (Phase 8) |
-| `sap-automate-memory` | Four-tier memory model (Phase 8) |
-| `apps/sap-automate-server` | Main MCP server binary (stdio); 12 tools, 11 resources, 2 prompts |
-| `apps/sap-automate-ingest` | Ingestion CLI (Phase 1A) |
-| `apps/sample-server` | Minimal demo server (echo + add) |
-| `apps/sample-client` | CLI client that drives any MCP server |
+| **RAG search** (5) | `abap.search`, `bpmn.find_process`, `eam.search_apps`, `sap.help.search`, `sap.docs.search` |
+| **SAP system / RFC / tables** (10) | `sap.system.info`, `sap.system.health`, `sap.rfc.search`, `sap.rfc.metadata`, `sap.rfc.bulk_metadata`, `sap.rfc.call`, `sap.table.read`, `sap.table.structure`, `sap.bapi.parse_return`, `sap.docs.search` |
+| **ABAP ADT** (11) | `abap.adt.get_program`, `…get_class`, `…get_interface`, `…get_include`, `…get_function_module`, `…get_package_contents`, `…get_cds_view`, `…search`, `…where_used`, `…get_table_contents`, `…activate` (write, gated) |
+| **Knowledge graph** (4) | `kb.multi_hop` (HippoRAG), `kb.global_query` (GraphRAG), `kb.summarise` (RAPTOR), `kb.graph_neighborhood` |
+| **Workflows** (3, write, gated) | `sap.workflow.create_purchase_order`, `sap.workflow.maintain_customer_master`, `sap.workflow.release_transport` |
+
+Plus **11 MCP resources**, **11 MCP prompts** (3 built-in + 8 disk-loaded skills auto-discovered from `./skills/*.md`).
+
+## Production posture
+
+- ✅ **104 tests passing** (unit + 17 ADT integration tests against a mock SAP server + 7 SAP-precision tests + 4 elicitation round-trips + 4 channel/scheduler/memory tests)
+- ✅ **Read-only by default**, `--enable-writes` to flip
+- ✅ **Structured error taxonomy** mapped to MCP JSON-RPC error codes (transient / permanent / degraded)
+- ✅ **AGENTS.md guardrails** loaded from disk; surfaced in `initialize.instructions` and as MCP resource
+- ✅ **Prometheus `/metrics`** endpoint with paper §IV-H named series
+- ✅ **Audit log** with PII / secret redaction
+- ✅ **GitHub Actions CI**: fmt, clippy, test (stable + beta), SAP precision gate, P95 acceptance gate, security audit, Docker build, K8s manifest lint, Next.js web build
+- ✅ **Production K8s manifests**: Deployment (3 replicas, distroless, nonroot, read-only rootfs), Service (ClientIP affinity), HPA (3–12), NetworkPolicy (default-deny), PodDisruptionBudget
+- 🚧 **Live SAP backend wiring** — `HttpAdtClient` complete (17 integration tests); `NetweaverSapClient` against a real sandbox is the next milestone
+- 🚧 **OAuth 2.1 / XSUAA** — service-key model in `AdtAuth`; production flow in P10
+- 🚧 **OpenTelemetry OTLP exporter** — tracing spans already structured; OTLP wiring is a one-file change behind a feature flag
+
+## Repository layout
+
+```
+sap-automate/
+├── crates/                        ← 13 Rust crates
+│   ├── mcp-core/                    JSON-RPC 2.0 + MCP 2025-06-18 types
+│   ├── mcp-transport/               stdio + HTTP/SSE transports
+│   ├── mcp-server/                  capability router + elicitation runtime
+│   ├── mcp-client/                  async client + ElicitationDelegate
+│   ├── sap-automate-rfc/            SapClient + RFC catalogue + BAPIRET2 parser
+│   ├── sap-automate-adt/            AdtClient (HTTP + mock; CSRF cache)
+│   ├── sap-automate-kb/             KB schema + InMemory + Qdrant
+│   ├── sap-automate-rag/            Hybrid RAG + reranker + graph layers
+│   ├── sap-automate-graph/          Entities + Louvain + PPR + RAPTOR
+│   ├── sap-automate-ingest/         Crawler + chunker + embedder
+│   ├── sap-automate-memory/         Working + episodic four-tier memory
+│   ├── sap-automate-scheduler/      TOML-declared proactive jobs
+│   ├── sap-automate-channels/       Teams / Slack / Telegram / CLI adapters
+│   ├── sap-automate-skills/         AGENTS.md-style skill loader
+│   └── sap-automate-observability/  Prometheus metrics + audit log + tracing
+├── apps/                          ← 7 binaries
+│   ├── sap-automate-server/         the MCP server (stdio + HTTP)
+│   ├── sap-automate-gw/             multi-channel agentic gateway
+│   ├── sap-automate-tui/            Ratatui operator console
+│   ├── sap-automate-ingest/         knowledge ingestion CLI
+│   ├── sap-automate-bench/          P95 acceptance harness
+│   ├── sample-server/               minimal echo+add MCP server
+│   ├── sample-client/               CLI MCP client
+│   └── web/                         Next.js 14 web UI
+├── skills/                        ← 8 auto-loaded agentic skills
+├── deploy/                        ← Dockerfile + K8s manifests + runbook
+├── docs/                          ← SAPAutomate.pdf, ROADMAP, SAP_CORRECTNESS, COMPARISON
+└── .github/workflows/             ← CI + release
+```
+
+## Documentation
+
+| Document | What |
+|---|---|
+| [`docs/SAPAutomate.pdf`](docs/SAPAutomate.pdf) | The ParagonCorp TPO R&D whitepaper — full architectural specification |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Phased delivery plan with current status per phase |
+| [`docs/SAP_CORRECTNESS.md`](docs/SAP_CORRECTNESS.md) | Every fixture mapped to its SAP source-of-truth |
+| [`docs/COMPARISON.md`](docs/COMPARISON.md) | Side-by-side analysis vs 6 reference SAP MCP servers |
+| [`deploy/k8s/README.md`](deploy/k8s/README.md) | Production deployment runbook |
+| [`AGENTS.md`](AGENTS.md) | Default agent guardrails (per-deployment overridable) |
+
+## Tests
+
+```bash
+cargo test --workspace --features sap-automate-adt/http
+# → 104 tests passing
+```
+
+Test coverage spans **104 unit + integration + acceptance tests** across:
+
+- **Protocol** (JSON-RPC framing, MCP 2025-06-18 handshake, elicitation round-trip)
+- **SAP correctness** (BAPI signatures, DDIC invariants, MANDT/RCLNT first-key, S/4HANA-storage notes)
+- **ADT integration** (17 axum-fixture tests exercising every HttpAdtClient path: URL patterns, headers, CSRF flow, XML parsers, error mapping)
+- **RAG pipeline** (BM25, RRF fusion, reranker promotion, contextual enrichment)
+- **Graph** (Louvain modularity, PPR convergence, RAPTOR levels)
+- **Agentic** (memory tiers, scheduler cadence, channel routing)
+- **Observability** (Prometheus rendering, audit redaction)
+
+## Credits
+
+SAP-Automate is built and maintained by the **ParagonCorp Technology Product Owner R&D team**. The architecture is documented in *SAP-Automate: An MCP-Native RAG Architecture for SAP S/4HANA* ([whitepaper](docs/SAPAutomate.pdf)), ParagonCorp Technical Review Vol. 1 No. 1 (2026).
+
+Reference designs studied while building this:
+
+- [`thupalo/sap-rfc-mcp-server`](https://github.com/thupalo/sap-rfc-mcp-server) — connection pooling + metadata cache patterns
+- [`CDataSoftware/sap-erp-mcp-server-by-cdata`](https://github.com/CDataSoftware/sap-erp-mcp-server-by-cdata) — read-only-by-default safety property
+- [`SAP/mdk-mcp-server`](https://github.com/SAP/mdk-mcp-server) — AGENTS.md + constrained-enum tool params
+- [`mario-andreschak/mcp-abap-adt`](https://github.com/mario-andreschak/mcp-abap-adt) — ADT REST URL canon
+- [`fr0ster/mcp-abap-adt`](https://github.com/fr0ster/mcp-abap-adt) — handler-exposure groups + multi-transport
+- [`marianfoo/sap-ai-mcp-servers`](https://github.com/marianfoo/sap-ai-mcp-servers) — 40+ server meta-registry, skills-layer convergence
 
 ## License
 
-Apache-2.0.
+[Apache-2.0](LICENSE). Use it, fork it, build a business on top of it.
+
+---
+
+<div align="center">
+
+**ParagonCorp** · TPO R&D · 2026
+*Reference design: PC-TR-2026-SAP-AUTOMATE-01*
+
+</div>

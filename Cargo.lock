@@ -1925,6 +1925,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sap-automate-observability"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "sap-automate-rag"
 version = "0.1.0"
 dependencies = [
@@ -1976,6 +1988,7 @@ dependencies = [
  "sap-automate-graph",
  "sap-automate-ingest",
  "sap-automate-kb",
+ "sap-automate-observability",
  "sap-automate-rag",
  "sap-automate-rfc",
  "sap-automate-skills",
