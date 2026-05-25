@@ -1,6 +1,6 @@
 # SAP-Automate Development Roadmap
 
-> **Status: v1.0.0 released — 2026-05-25.**  All paper phases ✅ complete.  See [`CHANGELOG.md`](../CHANGELOG.md) for the release notes.
+> **Status: v1.1.0 released — 2026-05-25.**  v1.0 paper phases ✅ complete; v1.1 ships three Karpathy-style convergence passes (skills + apps + KB/RAG/crawler).  See [`CHANGELOG.md`](../CHANGELOG.md) for the release notes.
 
 This document translates the SAP-Automate paper (ParagonCorp TPO R&D, 2026)
 into an executable Rust roadmap.
@@ -141,9 +141,25 @@ Phase 1A trait surfaces (`KnowledgeStore`, `EmbeddingClient`,
 
 ---
 
-# Post-v1.0 Forward Plan
+# Post-v1.1 Forward Plan
 
-> **v1.0.0 is the foundation, not the finish line.**  All paper phases (P1–P9) are complete; the codebase has 104 tests passing, sub-millisecond P95 retrieval, production K8s manifests, and a polished agentic surface.  Everything below is what we build *next*, anchored to the four strategic themes that turn this project from "best-in-class open source" into "the category-defining SAP-agent platform".
+> **v1.1.0 is the convergence-pass release, not the finish line.**  All paper phases (P1–P9) plus three Karpathy-style convergence passes are shipped; the codebase has 145 tests passing, sub-millisecond P95 retrieval, production K8s manifests, a polished agentic surface, and a hierarchical doc-tree navigation surface (OpenKB + PageIndex pattern).  Everything below is what we build *next*, anchored to the four strategic themes that turn this project from "best-in-class open source" into "the category-defining SAP-agent platform".
+
+## v1.1.0 — state of the union (released 2026-05-25)
+
+What v1.1 added on top of v1.0:
+
+| Surface | What shipped | Notes |
+|---|---|---|
+| Skills library | **8 → 13** auto-discovered | + Karpathy guidelines, AIPNV anti-autopilot, OData design, SoD audit, BW-to-Datasphere |
+| MCP tools | **32 → 35** | + `sap.system.cache_stats`, `sap.system.cache_invalidate`, `sap.kb.navigate` |
+| MCP resources | **11 → 12** | + `sap-cache://stats` |
+| KB layer | **`DocumentTree`** + content-hash dedup at upsert | OpenKB + PageIndex pattern; `KnowledgeStore::get_document_tree` default impl |
+| RAG layer | **`RetrievalDiagnostics`** on `SearchResponse` | dense / sparse counts, RRF overlap, tokenised query terms, reranker-ran flag |
+| Crawler | robots.txt + per-host rate-limiter + BM25 "fit markdown" filter | Crawl4AI convergent patterns; pure Rust, no new deps |
+| RFC layer | **`MetadataCache`** TTL decorator wired in the server | thupalo's `get_metadata_cache_stats` pattern; live in TUI KB tab + web Operations panel |
+| Gateway | Skill-aware routing (8 intents) | `match_skill()` invokes `prompts/get` before falling back to raw tools |
+| Tests | **104 → 145** | +6 metadata-cache +6 doc-tree +3 cache-tools integration +4 kb-navigate integration +7 robots +5 rate-limit +4 fit-markdown +3 store dedup/tree +2 RAG diagnostics +5 misc |
 
 ## v1.0.0 — state of the union (released 2026-05-25)
 

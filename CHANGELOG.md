@@ -6,14 +6,29 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
-## [Unreleased]
+## [1.1.0] — 2026-05-25  ·  Convergence pass
 
-A targeted convergence pass after surveying
-[`multica-ai/andrej-karpathy-skills`](https://github.com/multica-ai/andrej-karpathy-skills)
-and re-reading the six reference SAP MCP servers tracked in
-`docs/COMPARISON.md`. Follows the Karpathy
-"Simplicity First / Surgical Changes" discipline — additive only,
-no rewrites.
+Three Karpathy-style passes layered on top of v1.0 — each additive, none
+breaking — after surveying
+[`multica-ai/andrej-karpathy-skills`](https://github.com/multica-ai/andrej-karpathy-skills),
+[`VectifyAI/OpenKB`](https://github.com/VectifyAI/OpenKB) +
+[`VectifyAI/PageIndex`](https://github.com/VectifyAI/PageIndex),
+[`unclecode/crawl4ai`](https://github.com/unclecode/crawl4ai), and
+re-reading the six reference SAP MCP servers tracked in
+`docs/COMPARISON.md`.  Discipline: "Simplicity First / Surgical Changes"
+— no rewrites of existing surfaces.
+
+### Headlines
+
+- **Skills**: **8 → 13** auto-discovered (Karpathy guidelines, AIPNV
+  anti-autopilot, OData design, SoD audit, BW-to-Datasphere).
+- **MCP tools**: **32 → 35**
+  (`sap.system.cache_stats`, `sap.system.cache_invalidate`, `sap.kb.navigate`).
+- **MCP resources**: **11 → 12** (`sap-cache://stats`).
+- **Tests**: **104 → 145** passing (no flake-prone, all ≤ 0.1 s except the
+  ADT HTTP integration suite).
+- **No breaking API changes.**  Every addition is a new field on an
+  existing type, a new module, or a new trait default-impl.
 
 ### KB + RAG pass (2026-05-25 — same release window)
 

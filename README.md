@@ -20,6 +20,24 @@ Built by the **ParagonCorp TPO R&D Team**.
 
 ---
 
+## What's new in v1.1.0 (2026-05-25)
+
+Three Karpathy-style convergence passes, all additive — no breaking changes from v1.0.
+
+| Source | What we ported | Where it lives |
+|---|---|---|
+| [`multica-ai/andrej-karpathy-skills`](https://github.com/multica-ai/andrej-karpathy-skills) | Behavioural guidelines (think-before, simplicity, surgical, goal-driven) | `skills/karpathy-guidelines.md` + AGENTS.md pre-flight section |
+| [`fr0ster/mcp-abap-adt`](https://github.com/fr0ster/mcp-abap-adt) | AI-Pairing-Not-Vibing 5-question anti-autopilot checklist | `skills/aipnv-ai-pairing.md` |
+| [`marianfoo/sap-ai-mcp-servers`](https://github.com/marianfoo/sap-ai-mcp-servers) | OData generic-proxy design, Security MCP SoD audit, BW modernisation | 3 new skills + skill-aware gateway routing |
+| [`thupalo/sap-rfc-mcp-server`](https://github.com/thupalo/sap-rfc-mcp-server) | RFC metadata cache (`get_metadata_cache_stats` convergence) | `sap_automate_rfc::MetadataCache` + `sap.system.cache_stats` / `cache_invalidate` tools + `sap-cache://stats` resource |
+| [`VectifyAI/OpenKB`](https://github.com/VectifyAI/OpenKB) + [`VectifyAI/PageIndex`](https://github.com/VectifyAI/PageIndex) | Hierarchical document tree (table-of-contents from headings) | `sap_automate_kb::DocumentTree` + `sap.kb.navigate` MCP tool |
+| [`unclecode/crawl4ai`](https://github.com/unclecode/crawl4ai) | robots.txt respect + per-host rate limiting + BM25 "fit markdown" boilerplate filter | `sap_automate_ingest::{robots, rate_limit, fit_markdown}` |
+| (none — operator-requested) | Retrieval transparency: dense / sparse counts, RRF overlap, tokenised query terms | `RetrievalDiagnostics` on `SearchResponse` |
+
+Net delta from v1.0.0: skills **8 → 13**, MCP tools **32 → 35**, resources **11 → 12**, tests **104 → 145**.  See [`CHANGELOG.md`](CHANGELOG.md) for the full per-commit log.
+
+---
+
 ## The problem
 
 SAP S/4HANA powers the financials, supply chains, and HR of a substantial fraction of the global Fortune 500. Yet the gap between *what AI agents can do* and *what they can do against SAP* is enormous: only **3% of SAP customers run SAP Business AI in production**, and **77% of AI-active enterprises rely on non-SAP alternatives** (DSAG Investment Survey 2026). The few open-source MCP servers that bridge AI agents to SAP today are fragmented across vendors, drift from SAP API Hub canon, ship in Python/Node (10–100 ms latency tails), and lack on-premise support.
