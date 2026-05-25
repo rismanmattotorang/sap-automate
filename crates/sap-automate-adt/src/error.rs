@@ -9,7 +9,11 @@ use thiserror::Error;
 
 pub type AdtResult<T> = std::result::Result<T, AdtError>;
 
+/// Structured error codes for SAP ADT operations.  Numeric values are
+/// stable across releases; `#[non_exhaustive]` lets us add new variants
+/// without breaking downstream matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum AdtErrorCode {
     // Transient (-32100..-32199)
     Timeout = -32160,
@@ -42,6 +46,7 @@ impl AdtErrorCode {
 }
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum AdtError {
     #[error("ADT timeout after {timeout_ms} ms")]
     Timeout { timeout_ms: u64 },

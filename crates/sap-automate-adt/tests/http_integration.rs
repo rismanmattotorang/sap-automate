@@ -288,9 +288,34 @@ async fn handler_data_preview(
     if let Some(o) = check_override(&state, "POST", "/sap/bc/adt/datapreview/freestyle").await {
         return o;
     }
-    // Minimal "successful" body — the parser today returns Vec::new()
-    // either way, so the test just asserts no error.
-    (StatusCode::OK, "<dataPreview/>").into_response()
+    // Canonical ADT data-preview response shape (verified against
+    // open-source ADT clients).  Two columns × two rows.
+    let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<dataPreview:tableData xmlns:dataPreview="http://www.sap.com/adt/dataPreview"
+                       xmlns:adtcore="http://www.sap.com/adt/core">
+  <dataPreview:columns>
+    <dataPreview:metadata adtcore:name="MANDT" adtcore:type="C" adtcore:length="3"/>
+    <dataPreview:metadata adtcore:name="BUKRS" adtcore:type="C" adtcore:length="4"/>
+    <dataPreview:metadata adtcore:name="BUTXT" adtcore:type="C" adtcore:length="25"/>
+  </dataPreview:columns>
+  <dataPreview:rows>
+    <dataPreview:row>
+      <dataPreview:cells>
+        <dataPreview:cell adtcore:value="100"/>
+        <dataPreview:cell adtcore:value="1000"/>
+        <dataPreview:cell adtcore:value="Acme Global HQ"/>
+      </dataPreview:cells>
+    </dataPreview:row>
+    <dataPreview:row>
+      <dataPreview:cells>
+        <dataPreview:cell adtcore:value="100"/>
+        <dataPreview:cell adtcore:value="2000"/>
+        <dataPreview:cell adtcore:value="Acme EMEA"/>
+      </dataPreview:cells>
+    </dataPreview:row>
+  </dataPreview:rows>
+</dataPreview:tableData>"#;
+    (StatusCode::OK, xml).into_response()
 }
 
 async fn handler_activation(
@@ -495,7 +520,18 @@ async fn where_used_posts_xml_with_correct_content_type() {
 async fn data_preview_posts_select_body_with_text_plain() {
     let (addr, state) = spawn_mock_server().await;
     let client = HttpAdtClient::new(destination(addr)).unwrap();
-    let _rows = client.get_table_contents("T001", 5).await.unwrap();
+    let rows = client.get_table_contents("T001", 5).await.unwrap();
+    // Regression for the v1.0 review pass: the parser used to return
+    // Vec::new() unconditionally; now it must extract the rows.
+    assert_eq!(rows.len(), 2, "expected 2 rows from the canonical data-preview fixture; got {rows:?}");
+    let r0 = &rows[0].values;
+    assert_eq!(r0.get("MANDT").and_then(|v| v.as_str()), Some("100"));
+    assert_eq!(r0.get("BUKRS").and_then(|v| v.as_str()), Some("1000"));
+    assert_eq!(r0.get("BUTXT").and_then(|v| v.as_str()), Some("Acme Global HQ"));
+    let r1 = &rows[1].values;
+    assert_eq!(r1.get("BUKRS").and_then(|v| v.as_str()), Some("2000"));
+    assert_eq!(r1.get("BUTXT").and_then(|v| v.as_str()), Some("Acme EMEA"));
+
     let recorded = state.last().await.unwrap();
     assert_eq!(recorded.method, "POST");
     assert!(recorded.path.starts_with("/sap/bc/adt/datapreview/freestyle"));

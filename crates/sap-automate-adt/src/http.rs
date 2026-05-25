@@ -497,11 +497,148 @@ fn parse_search_results(xml: &str) -> Vec<AdtSearchHit> {
     out
 }
 
-fn parse_data_preview(_text: &str) -> Vec<TableRow> {
-    // Real ADT returns XML with column metadata + row data.  The full
-    // parser is Phase 2 finalisation; for now we return empty so callers
-    // know to inspect the raw body via a future `raw=true` flag.
-    Vec::new()
+/// Parse the XML body returned by the ADT data-preview endpoint into
+/// structured `TableRow`s.  The wire shape is well-documented in the
+/// SAP ADT spec; this parser handles the two common variants:
+///
+///   1. **Cells-with-value-attribute** (the older, more common form):
+///      ```xml
+///      <dataPreview:tableData ...>
+///        <dataPreview:columns>
+///          <dataPreview:metadata adtcore:name="MANDT" adtcore:type="C"/>
+///          <dataPreview:metadata adtcore:name="BUKRS" adtcore:type="C"/>
+///        </dataPreview:columns>
+///        <dataPreview:rows>
+///          <dataPreview:row>
+///            <dataPreview:cells>
+///              <dataPreview:cell adtcore:value="100"/>
+///              <dataPreview:cell adtcore:value="1000"/>
+///            </dataPreview:cells>
+///          </dataPreview:row>
+///        </dataPreview:rows>
+///      </dataPreview:tableData>
+///      ```
+///
+///   2. **Cells-with-text-content** (used by some ADT releases):
+///      ```xml
+///      <dataPreview:cell>100</dataPreview:cell>
+///      ```
+///
+/// Unknown / corrupted bodies return an empty `Vec` rather than
+/// erroring — the caller already knows it asked for table data and a
+/// 200-with-empty-rows response is informative enough.
+fn parse_data_preview(text: &str) -> Vec<TableRow> {
+    use quick_xml::events::Event;
+    use quick_xml::Reader;
+
+    let mut columns: Vec<String> = Vec::new();
+    let mut rows: Vec<TableRow> = Vec::new();
+    let mut reader = Reader::from_str(text);
+    let mut buf = Vec::new();
+    let mut in_row = false;
+    let mut cur_cell_idx = 0usize;
+    let mut cur_row: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+    let mut cur_cell_text = String::new();
+    let mut in_cell = false;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Empty(e)) => {
+                let raw = e.name();
+                let local = local_name(&raw);
+                if local == "metadata" {
+                    if let Some(name) = attr_named(&e, "name") {
+                        columns.push(name);
+                    }
+                } else if local == "cell" {
+                    // Empty <cell adtcore:value="..."/> form.
+                    if let Some(value) = attr_named(&e, "value") {
+                        if cur_cell_idx < columns.len() {
+                            let col = columns[cur_cell_idx].clone();
+                            cur_row.insert(col, serde_json::Value::String(value));
+                        }
+                        cur_cell_idx += 1;
+                    } else if cur_cell_idx < columns.len() {
+                        // Cell with no value attribute → empty string.
+                        let col = columns[cur_cell_idx].clone();
+                        cur_row.insert(col, serde_json::Value::String(String::new()));
+                        cur_cell_idx += 1;
+                    }
+                }
+            }
+            Ok(Event::Start(e)) => {
+                let raw = e.name();
+                let local = local_name(&raw);
+                if local == "metadata" {
+                    if let Some(name) = attr_named(&e, "name") {
+                        columns.push(name);
+                    }
+                } else if local == "row" {
+                    in_row = true;
+                    cur_cell_idx = 0;
+                    cur_row.clear();
+                } else if local == "cell" && in_row {
+                    in_cell = true;
+                    cur_cell_text.clear();
+                    // The cells-with-value form: capture the attribute now;
+                    // a sibling text node may override.
+                    if let Some(value) = attr_named(&e, "value") {
+                        cur_cell_text = value;
+                    }
+                }
+            }
+            Ok(Event::Text(t)) => {
+                if in_cell {
+                    let s = t.unescape().unwrap_or_default().to_string();
+                    let trimmed = s.trim();
+                    if !trimmed.is_empty() {
+                        cur_cell_text = trimmed.to_string();
+                    }
+                }
+            }
+            Ok(Event::End(e)) => {
+                let raw = e.name();
+                let local = local_name(&raw);
+                if local == "cell" {
+                    if in_cell && cur_cell_idx < columns.len() {
+                        let col = columns[cur_cell_idx].clone();
+                        cur_row.insert(col, serde_json::Value::String(std::mem::take(&mut cur_cell_text)));
+                    }
+                    cur_cell_idx += 1;
+                    in_cell = false;
+                } else if local == "row" {
+                    if in_row && !cur_row.is_empty() {
+                        rows.push(TableRow { values: std::mem::take(&mut cur_row) });
+                    }
+                    in_row = false;
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    rows
+}
+
+/// Strip XML namespace prefix from a tag name.
+fn local_name(name: &quick_xml::name::QName<'_>) -> String {
+    let raw = String::from_utf8_lossy(name.as_ref()).into_owned();
+    raw.rsplit(':').next().unwrap_or(&raw).to_string()
+}
+
+/// Look up an attribute by local (namespace-stripped) name.
+fn attr_named(e: &quick_xml::events::BytesStart<'_>, target: &str) -> Option<String> {
+    for attr in e.attributes().flatten() {
+        let k_raw = String::from_utf8_lossy(attr.key.as_ref()).into_owned();
+        let local = k_raw.rsplit(':').next().unwrap_or(&k_raw);
+        if local == target {
+            return Some(attr.unescape_value().unwrap_or_default().into_owned());
+        }
+    }
+    None
 }
 
 /// Parse the `usageReferences:result` XML returned by the ADT

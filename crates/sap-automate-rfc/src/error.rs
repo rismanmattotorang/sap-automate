@@ -12,7 +12,11 @@ pub type RfcResult<T> = std::result::Result<T, RfcError>;
 /// RFC error codes.  Values overlap the MCP code ranges in
 /// `mcp_core::error::ErrorCode` so they translate cleanly when serialised
 /// into a JSON-RPC error object.
+/// Structured error codes for SAP RFC operations.  Numeric values are
+/// stable across releases; `#[non_exhaustive]` lets us add new variants
+/// in a minor release without breaking exhaustive matches in user code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RfcErrorCode {
     // Transient (-32100..-32199): retryable
     Timeout = -32110,
@@ -47,6 +51,7 @@ impl RfcErrorCode {
 }
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum RfcError {
     #[error("RFC timeout after {timeout_ms} ms")]
     Timeout { timeout_ms: u64 },

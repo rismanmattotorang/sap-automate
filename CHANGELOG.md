@@ -1,0 +1,165 @@
+# Changelog
+
+All notable changes to **SAP-Automate** are documented here.  The format
+follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
+this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+---
+
+## [1.0.0] — 2026-05-25  ·  First public release
+
+The first general-availability release of **SAP-Automate** — a
+Rust-native, MCP-native agentic interface for SAP S/4HANA built by
+the **ParagonCorp TPO R&D team**.
+
+### Highlights
+
+- **32 MCP tools** across 5 SAP domains (RAG search, RFC + tables, ABAP
+  ADT, knowledge graph, guided workflows) with full schema-driven
+  forms, structured-enum parameters, and read-only-by-default safety.
+- **104 tests passing** — including 7 SAP-precision tests that enforce
+  DDIC / BAPI invariants in CI, 17 ADT integration tests against an
+  axum mock SAP server, and a P95 acceptance benchmark.
+- **Sub-millisecond retrieval**: hybrid RAG P95 = **0.16 ms** (500×
+  under paper §X-D's 80 ms gate); HippoRAG multi-hop P95 = **0.08 ms**
+  (5000× under §X-H's 400 ms gate).
+- **MCP 2025-06-18** wire-format compliance, including live
+  **structured elicitation** for guided workflows.
+- **Production deployment artefacts**: multi-stage distroless
+  Dockerfile, hardened K8s manifests (Deployment, Service, HPA,
+  NetworkPolicy, PodDisruptionBudget), Kustomize entry point,
+  operator runbook.
+- **Observability**: Prometheus `/metrics` endpoint, audit log with
+  PII / secret redaction, OpenTelemetry-ready tracing.
+
+### Added
+
+#### Protocol & framework
+
+- `mcp-core`: JSON-RPC 2.0 codec + full MCP 2025-06-18 protocol types
+  (initialize, tools, resources, prompts, elicitation).
+- `mcp-transport`: `Transport` trait + stdio + HTTP/SSE transport
+  (under `http` feature).  Stdio supports independent read/write
+  splits for cancellation-safe elicitation under load.
+- `mcp-server`: builder API, capability router, `ExposurePolicy` for
+  read-only / write-enabled tool filtering, `ElicitationHandle` +
+  `tokio::task_local!` `TOOL_CONTEXT` for mid-tool elicitation.
+- `mcp-client`: async client with request/response correlation,
+  `ElicitationDelegate` trait (decline / accept / stdin / seed
+  delegates ship in `sample-client`).
+
+#### SAP integration
+
+- `sap-automate-rfc`: `SapClient` async trait + `MockSapClient` with
+  realistic FI / MM / SD fixtures.  Connection pool, circuit breaker,
+  retry-with-backoff, layered credential provider.  Structured
+  `RfcError` taxonomy mapped to MCP JSON-RPC codes.  `BAPIRET2`
+  parser for SAP-standard return contracts.
+- `sap-automate-adt`: `AdtClient` trait + `MockAdtClient` (offline) +
+  `HttpAdtClient` (under `http` feature) with CSRF cache, X-SAP-Client
+  capitalisation, real ADT URL canon, full data-preview XML parser.
+  Destination model + 5 auth schemes.
+
+#### Knowledge base + retrieval
+
+- `sap-automate-kb`: `KnowledgeStore` trait, in-memory + Qdrant
+  backends, document / chunk schema per paper §VI.
+- `sap-automate-rag`: hybrid retrieval (dense + BM25 + RRF + cross-
+  encoder reranker), contextual chunk enrichment, latency breakdown
+  per layer.
+- `sap-automate-graph`: typed cross-domain knowledge graph, Louvain
+  community detection, Personalised PageRank (HippoRAG), 3-level
+  RAPTOR hierarchical clusters.
+- `sap-automate-ingest`: HTML crawler, sentence-boundary chunker,
+  `EmbeddingClient` trait (`MockEmbedder` + `OpenAiEmbedder`),
+  ingestion pipeline.
+
+#### Agentic layer
+
+- `sap-automate-skills`: AGENTS.md-style skill loader.  8 starter
+  skills auto-loaded as MCP prompts.
+- `sap-automate-memory`: 4-tier memory (working ring buffer,
+  episodic tag/tenant index, semantic via RAG, procedural via skills).
+- `sap-automate-scheduler`: TOML-declared proactive jobs with 5
+  cadence kinds (every-N / hourly / daily / weekly / quarterly).
+- `sap-automate-channels`: `ChannelAdapter` trait, working `CliChannel`,
+  Teams / Slack / Telegram skeletons, `ChannelRegistry`.
+
+#### Production
+
+- `sap-automate-observability`: Prometheus metrics registry, audit
+  log with secret redaction, tracing init scaffolding.
+- Multi-stage Dockerfile (distroless runtime, nonroot UID, ≈ 20 MB).
+- 9 K8s manifests: Deployment, Service, HPA, NetworkPolicy,
+  PodDisruptionBudget, ConfigMap, Secret template, Kustomize,
+  Namespace.
+- GitHub Actions: CI (fmt, clippy, stable+beta test matrix, SAP
+  precision gate, P95 bench gate, cargo-audit, Docker build, K8s
+  manifest lint, Next.js web build), release pipeline (Linux x86_64
+  + aarch64 binaries via `cross`, multi-arch container push to GHCR).
+
+#### Applications
+
+- `apps/sap-automate-server`: the main MCP server (stdio + HTTP).
+- `apps/sap-automate-gw`: multi-channel agentic gateway with intent
+  routing + 4-tier memory + scheduler integration.
+- `apps/sap-automate-tui`: 5-tab Ratatui operator console.
+- `apps/sap-automate-ingest`: knowledge ingestion CLI.
+- `apps/sap-automate-bench`: P95 acceptance harness.
+- `apps/web`: Next.js 14 web UI — Operations, Query Lab, Graph Lab,
+  Tool Explorer, Skill Lab, Resources.
+- `apps/sample-server`, `apps/sample-client`: minimal pair for smoke
+  testing and framework demos.
+
+### Documentation
+
+- `docs/SAPAutomate.pdf` — full architectural whitepaper.
+- `docs/ROADMAP.md` — phased delivery plan, all phases ✅.
+- `docs/SAP_CORRECTNESS.md` — every fixture mapped to its SAP source.
+- `docs/COMPARISON.md` — analysis vs 6 reference SAP MCP servers.
+- `deploy/k8s/README.md` — production deployment runbook.
+- `AGENTS.md` — default agent guardrails.
+
+### Fixed (during v1.0 review pass)
+
+- `RfcError::Internal` and `AdtError::Internal` were misclassified as
+  transient — they now map to dedicated `Internal` codes (`-32299` /
+  `-32298`) so retry logic does not spin on programming bugs.
+- `sap.table.read` now auto-applies a MANDT / RCLNT client filter
+  when the caller doesn't specify one — matches SE16 / SM30 and the
+  standard `RFC_READ_TABLE` convention, eliminates cross-client
+  leakage by construction.
+- `parse_nodestructure` rewritten to handle the child-element XML
+  shape that real SAP `repository/nodestructure` responses use (the
+  old attribute-form-only parser would have returned empty results
+  against any production SAP system).
+- `parse_data_preview` rewritten — was always returning `Vec::new()`.
+  Now extracts `<dataPreview:row>/<dataPreview:cell>` data, supporting
+  both `adtcore:value` attribute and inline-text cell variants.
+- ADT URL pattern for package contents corrected from
+  `GET /sap/bc/adt/repository/nodestructure?...` to
+  `POST /sap/bc/adt/repository/nodestructure` with form body.
+- `X-SAP-Client` HTTP header capitalisation aligned with the SAP ADT
+  spec (some older NW gateways are case-sensitive).
+- Single-actor `select!` dispatch loop replaced with split reader /
+  writer tasks on both server and client — cancellation-safe under
+  any concurrent load (proven by load testing in P6).
+
+### Migration notes (for adopters tracking pre-1.0 commits)
+
+- Public error enums (`RfcError`, `AdtError`, `RfcErrorCode`,
+  `AdtErrorCode`) are now `#[non_exhaustive]`.  Update any exhaustive
+  matches to add a wildcard arm.
+- `Server::run` over a generic `Transport` no longer supports
+  elicitation; stdio callers must use `Server::run_stdio(reader,
+  writer)` (the existing `into_parts()` split).
+- `Client::spawn_with_delegate` is retained but `Client::spawn_stdio`
+  is recommended — the split-half client is the only one safe for
+  workflows that involve server-initiated requests.
+
+---
+
+## Reference
+
+- Architecture whitepaper: *SAP-Automate: An MCP-Native RAG Architecture for SAP S/4HANA*, ParagonCorp Technical Review Vol. 1 No. 1 (2026).  Reference design code `PC-TR-2026-SAP-AUTOMATE-01`.
+- MCP specification: <https://modelcontextprotocol.io/specification/2025-06-18>.

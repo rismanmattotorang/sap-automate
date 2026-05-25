@@ -41,7 +41,6 @@ pub enum MetricKind {
 #[derive(Debug)]
 struct MetricState {
     kind: MetricKind,
-    help: String,
     /// Counter / Gauge value.
     scalar: f64,
     /// Histogram buckets `[upper_bound_seconds, ...]` cumulative.
@@ -106,7 +105,7 @@ impl MetricsRegistry {
         let key = series_key(name, labels);
         let mut series = self.series.write().unwrap();
         let entry = series.entry(key).or_insert_with(|| MetricState {
-            kind: MetricKind::Counter, help: String::new(),
+            kind: MetricKind::Counter,
             scalar: 0.0, bucket_bounds: Vec::new(),
             bucket_counts: Vec::new(), sum: 0.0, count: 0,
         });
@@ -117,7 +116,7 @@ impl MetricsRegistry {
         let key = series_key(name, labels);
         let mut series = self.series.write().unwrap();
         let entry = series.entry(key).or_insert_with(|| MetricState {
-            kind: MetricKind::Gauge, help: String::new(),
+            kind: MetricKind::Gauge,
             scalar: 0.0, bucket_bounds: Vec::new(),
             bucket_counts: Vec::new(), sum: 0.0, count: 0,
         });
@@ -133,7 +132,7 @@ impl MetricsRegistry {
             let bounds: Vec<f64> = DEFAULT_BUCKETS_SECONDS.iter().copied().collect();
             let counts = vec![0u64; bounds.len() + 1]; // +1 for +Inf
             MetricState {
-                kind: MetricKind::Histogram, help: String::new(),
+                kind: MetricKind::Histogram,
                 scalar: 0.0, bucket_bounds: bounds, bucket_counts: counts,
                 sum: 0.0, count: 0,
             }

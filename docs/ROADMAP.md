@@ -1,5 +1,7 @@
 # SAP-Automate Development Roadmap
 
+> **Status: v1.0.0 released — 2026-05-25.**  All paper phases ✅ complete.  See [`CHANGELOG.md`](../CHANGELOG.md) for the release notes.
+
 This document translates the SAP-Automate paper (ParagonCorp TPO R&D, 2026)
 into an executable Rust roadmap.
 
