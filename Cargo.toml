@@ -14,10 +14,13 @@ members = [
     "crates/sap-automate-rfc",
     "crates/sap-automate-adt",
     "crates/sap-automate-graph",
+    "crates/sap-automate-scheduler",
+    "crates/sap-automate-channels",
     "apps/sap-automate-server",
     "apps/sap-automate-ingest",
     "apps/sap-automate-bench",
     "apps/sap-automate-tui",
+    "apps/sap-automate-gw",
     "apps/sample-server",
     "apps/sample-client",
 ]
@@ -63,6 +66,8 @@ sap-automate-ingest = { path = "crates/sap-automate-ingest" }
 sap-automate-rfc = { path = "crates/sap-automate-rfc" }
 sap-automate-adt = { path = "crates/sap-automate-adt" }
 sap-automate-graph = { path = "crates/sap-automate-graph" }
+sap-automate-scheduler = { path = "crates/sap-automate-scheduler" }
+sap-automate-channels = { path = "crates/sap-automate-channels" }
 axum = "0.7"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "cors"] }

@@ -1727,6 +1727,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sap-automate-channels"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "sap-automate-connectors"
 version = "0.1.0"
 dependencies = [
@@ -1745,6 +1757,26 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "sap-automate-gw"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "clap",
+ "mcp-client",
+ "mcp-core",
+ "mcp-transport",
+ "sap-automate-channels",
+ "sap-automate-memory",
+ "sap-automate-scheduler",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1799,8 +1831,12 @@ dependencies = [
 name = "sap-automate-memory"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "serde",
  "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1825,6 +1861,19 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "sap-automate-scheduler"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml",
  "tracing",
 ]
 

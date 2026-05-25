@@ -1,0 +1,33 @@
+# Phase 8 declared SAP monitoring jobs.  Each fires through the
+# gateway, hits an MCP tool, and posts the result to the declared
+# channel (when an adapter is registered).
+#
+# These are the canonical examples from paper §IX-B P4.
+
+[[jobs]]
+name = "atc_weekly_summary"
+tool = "sap.docs.search"
+channel = "cli:fin-ops"
+arguments = { query = "ATC findings test cockpit recent", top_k = 3, domain = "all" }
+schedule = { kind = "weekly", weekday = 1, hour = 8, minute = 0 }
+
+[[jobs]]
+name = "leanix_eol_quarterly"
+tool = "kb.global_query"
+channel = "cli:enterprise-arch"
+arguments = { query = "LeanIX applications years-to-EOL", top_k = 3 }
+schedule = { kind = "quarterly", day = 1, hour = 9, minute = 0 }
+
+[[jobs]]
+name = "period_close_daily"
+tool = "sap.docs.search"
+channel = "cli:fin-ops"
+arguments = { query = "period close procedure FAGLF03", top_k = 3 }
+schedule = { kind = "daily", hour = 7, minute = 30 }
+
+[[jobs]]
+name = "transport_qa_hourly"
+tool = "sap.docs.search"
+channel = "cli:basis"
+arguments = { query = "transport release QA TMS_MGR_FORWARD_TR_REQUEST", top_k = 2 }
+schedule = { kind = "hourly", minute = 15 }

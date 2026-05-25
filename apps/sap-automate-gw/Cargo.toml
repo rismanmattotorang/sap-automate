@@ -1,0 +1,26 @@
+[package]
+name = "sap-automate-gw"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Phase 8 multi-channel gateway binary: route channel-initiated queries through MCP tool calls (paper §IX-B + §X-K)."
+
+[[bin]]
+name = "sap-automate-gw"
+path = "src/main.rs"
+
+[dependencies]
+mcp-core = { workspace = true }
+mcp-client = { workspace = true }
+mcp-transport = { workspace = true }
+sap-automate-channels = { workspace = true }
+sap-automate-scheduler = { workspace = true }
+sap-automate-memory = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+async-trait = { workspace = true }
