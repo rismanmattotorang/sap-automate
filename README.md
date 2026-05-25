@@ -4,12 +4,12 @@
 
 **The Rust-native, MCP-native agentic interface for SAP S/4HANA.**
 
-*Sub-millisecond retrieval · 110 SAP-correctness tests · On-premise capable · Apache-2.0*
+*Sub-millisecond retrieval · 113 SAP-correctness tests · On-premise capable · Apache-2.0*
 
 Built by the **ParagonCorp TPO R&D Team**.
 
 [![CI](https://img.shields.io/badge/CI-passing-22c55e?style=flat-square&logo=githubactions)](.github/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-110%20passing-22d3ee?style=flat-square)](#tests)
+[![Tests](https://img.shields.io/badge/tests-113%20passing-22d3ee?style=flat-square)](#tests)
 [![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange?style=flat-square&logo=rust)](https://www.rust-lang.org)
 [![MCP](https://img.shields.io/badge/MCP-2025--06--18-8b5cf6?style=flat-square)](https://modelcontextprotocol.io)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
@@ -140,17 +140,17 @@ Every layer is a trait-based seam: `KnowledgeStore`, `EmbeddingClient`, `SapClie
 
 ## What's inside
 
-**32 production MCP tools** across 5 domains:
+**34 production MCP tools** across 5 domains:
 
 | Domain | Tools |
 |---|---|
 | **RAG search** (5) | `abap.search`, `bpmn.find_process`, `eam.search_apps`, `sap.help.search`, `sap.docs.search` |
-| **SAP system / RFC / tables** (10) | `sap.system.info`, `sap.system.health`, `sap.rfc.search`, `sap.rfc.metadata`, `sap.rfc.bulk_metadata`, `sap.rfc.call`, `sap.table.read`, `sap.table.structure`, `sap.bapi.parse_return`, `sap.docs.search` |
+| **SAP system / RFC / tables** (12) | `sap.system.info`, `sap.system.health`, `sap.system.cache_stats`, `sap.system.cache_invalidate`, `sap.rfc.search`, `sap.rfc.metadata`, `sap.rfc.bulk_metadata`, `sap.rfc.call`, `sap.table.read`, `sap.table.structure`, `sap.bapi.parse_return`, `sap.docs.search` |
 | **ABAP ADT** (11) | `abap.adt.get_program`, `…get_class`, `…get_interface`, `…get_include`, `…get_function_module`, `…get_package_contents`, `…get_cds_view`, `…search`, `…where_used`, `…get_table_contents`, `…activate` (write, gated) |
 | **Knowledge graph** (4) | `kb.multi_hop` (HippoRAG), `kb.global_query` (GraphRAG), `kb.summarise` (RAPTOR), `kb.graph_neighborhood` |
 | **Workflows** (3, write, gated) | `sap.workflow.create_purchase_order`, `sap.workflow.maintain_customer_master`, `sap.workflow.release_transport` |
 
-Plus **11 MCP resources**, **16 MCP prompts** (3 built-in + 13 disk-loaded skills auto-discovered from `./skills/*.md`).
+Plus **12 MCP resources** (`sap-system://info`, `sap-rfc://…`, `sap-table://…`, `adt-destination://info`, `sap-cache://stats`, `agents://guardrails`), **16 MCP prompts** (3 built-in + 13 disk-loaded skills auto-discovered from `./skills/*.md`).
 
 The skill library bundles **behavioural guidelines** alongside SAP workflows:
 
@@ -165,7 +165,7 @@ The skill library bundles **behavioural guidelines** alongside SAP workflows:
 
 ## Production posture
 
-- ✅ **110 tests passing** (unit + 17 ADT integration tests against a mock SAP server + 7 SAP-precision tests + 4 elicitation round-trips + 4 channel/scheduler/memory tests + 6 RFC metadata-cache tests)
+- ✅ **113 tests passing** (unit + 17 ADT integration tests against a mock SAP server + 7 SAP-precision tests + 4 elicitation round-trips + 4 channel/scheduler/memory tests + 6 RFC metadata-cache tests + 3 server-binary integration tests for the cache tool surface)
 - ✅ **Read-only by default**, `--enable-writes` to flip
 - ✅ **Structured error taxonomy** mapped to MCP JSON-RPC error codes (transient / permanent / degraded)
 - ✅ **AGENTS.md guardrails** loaded from disk; surfaced in `initialize.instructions` and as MCP resource

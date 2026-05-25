@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { initialize, listTools, listResources, listPrompts, callTool, Tool, Prompt } from '@/lib/mcp';
+import { initialize, listTools, listResources, listPrompts, callTool, parseToolJson, Tool, Prompt } from '@/lib/mcp';
 import { Badge, Card, PageHeader } from '@/components/badge';
 
 interface ToolStat {
@@ -14,6 +14,15 @@ interface ToolStat {
   isWrite?: boolean;
 }
 
+interface CacheStats {
+  enabled: boolean;
+  hits?: number;
+  misses?: number;
+  entries?: number;
+  evictions?: number;
+  hit_ratio?: number;
+}
+
 export default function Operations() {
   const [server, setServer] = useState<{ name: string; version: string } | null>(null);
   const [protocolVersion, setProtocolVersion] = useState('');
@@ -22,6 +31,7 @@ export default function Operations() {
   const [resourceCount, setResourceCount] = useState(0);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [stats, setStats] = useState<Record<string, ToolStat>>({});
+  const [cache, setCache] = useState<CacheStats | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pinging, setPinging] = useState(true);
 
@@ -43,6 +53,25 @@ export default function Operations() {
       }
     })();
   }, []);
+
+  // Poll the RFC metadata cache stats every 2 s (thupalo/sap-rfc-mcp-server
+  // pattern, surfaced through `sap.system.cache_stats`).
+  useEffect(() => {
+    if (!server) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const r = await callTool('sap.system.cache_stats', {});
+        const parsed = parseToolJson<CacheStats>(r);
+        if (!cancelled && parsed) setCache(parsed);
+      } catch {
+        // Tool may not exist on older servers — fail soft.
+      }
+      if (!cancelled) setTimeout(tick, 2000);
+    };
+    tick();
+    return () => { cancelled = true; };
+  }, [server]);
 
   // Synthetic background traffic so the dashboard isn't dead on first load.
   useEffect(() => {
@@ -156,6 +185,47 @@ export default function Operations() {
           </div>
         </Card>
 
+        {/* RFC metadata cache (thupalo pattern) */}
+        <Card
+          title="RFC metadata cache"
+          right={
+            cache?.enabled === false
+              ? <Badge tone="warn">disabled</Badge>
+              : cache && cache.hit_ratio !== undefined
+                ? <Badge tone={cache.hit_ratio >= 0.8 ? 'good' : cache.hit_ratio >= 0.5 ? 'warn' : 'bad'}>{(cache.hit_ratio * 100).toFixed(1)}% hit ratio</Badge>
+                : <Badge tone="neutral">polling…</Badge>
+          }
+        >
+          {cache?.enabled === false ? (
+            <div className="text-xs text-ink-600">
+              Cache disabled. Restart the server with <code className="text-accent-500">--metadata-cache-ttl-secs &gt; 0</code> to enable.
+            </div>
+          ) : cache ? (
+            <div>
+              <div className="grid grid-cols-4 gap-3">
+                <CacheStat label="Hits" value={cache.hits ?? 0} tone="good" />
+                <CacheStat label="Misses" value={cache.misses ?? 0} tone="warn" />
+                <CacheStat label="Entries" value={cache.entries ?? 0} tone="accent" />
+                <CacheStat label="Evictions" value={cache.evictions ?? 0} tone="neutral" />
+              </div>
+              <div className="mt-3 h-2 rounded-full bg-ink-800 overflow-hidden">
+                <div
+                  className={`h-full transition-all ${
+                    (cache.hit_ratio ?? 0) >= 0.8 ? 'bg-good' : (cache.hit_ratio ?? 0) >= 0.5 ? 'bg-warn' : 'bg-bad'
+                  }`}
+                  style={{ width: `${((cache.hit_ratio ?? 0) * 100).toFixed(0)}%` }}
+                />
+              </div>
+              <div className="mt-2 text-[11px] text-ink-600">
+                Convergent pattern from <code>thupalo/sap-rfc-mcp-server</code> — cached metadata reads are ~1–5 ms vs ~200–500 ms direct.
+                Resource: <code className="text-accent-500">sap-cache://stats</code> · tools: <code className="text-accent-500">sap.system.cache_stats</code>, <code className="text-accent-500">sap.system.cache_invalidate</code>.
+              </div>
+            </div>
+          ) : (
+            <div className="text-xs text-ink-600">Polling cache stats…</div>
+          )}
+        </Card>
+
         {/* Tool catalogue grouped */}
         <Card title="Tool catalogue (grouped by domain)">
           <div className="space-y-4">
@@ -216,6 +286,22 @@ export default function Operations() {
         </div>
       </div>
     </>
+  );
+}
+
+function CacheStat({ label, value, tone }: { label: string; value: number; tone: 'good' | 'warn' | 'bad' | 'accent' | 'neutral' }) {
+  const valueTone = {
+    good: 'text-good',
+    warn: 'text-warn',
+    bad: 'text-bad',
+    accent: 'text-accent-500',
+    neutral: 'text-zinc-300',
+  }[tone];
+  return (
+    <div className="rounded border border-ink-800 bg-ink-950 px-3 py-2">
+      <div className="text-[10.5px] text-ink-600 uppercase tracking-wide">{label}</div>
+      <div className={`text-lg font-bold ${valueTone}`}>{value.toLocaleString()}</div>
+    </div>
   );
 }
 

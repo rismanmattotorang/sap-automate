@@ -1981,6 +1981,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "clap",
+ "mcp-client",
  "mcp-core",
  "mcp-server",
  "mcp-transport",

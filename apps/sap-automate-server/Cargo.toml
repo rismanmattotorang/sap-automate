@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 description = "SAP-Automate MCP server binary (Phase 1)."
 
+[lib]
+name = "sap_automate_server_lib"
+path = "src/lib.rs"
+
 [[bin]]
 name = "sap-automate-server"
 path = "src/main.rs"
@@ -29,3 +33,9 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true }
+
+[dev-dependencies]
+mcp-client = { workspace = true }
+mcp-transport = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }

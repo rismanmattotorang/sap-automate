@@ -106,6 +106,8 @@ pub fn sap_tools(ctx: &Arc<ServerContext>) -> Vec<ToolDescriptor> {
     vec![
         tool_system_info(ctx),
         tool_system_health(ctx),
+        tool_system_cache_stats(ctx),
+        tool_system_cache_invalidate(ctx),
         tool_rfc_search(ctx),
         tool_rfc_metadata(ctx),
         tool_rfc_bulk_metadata(ctx),
@@ -115,6 +117,77 @@ pub fn sap_tools(ctx: &Arc<ServerContext>) -> Vec<ToolDescriptor> {
         tool_docs_search(ctx),
         tool_bapi_parse_return(ctx),
     ]
+}
+
+// --- sap.system.cache_stats ------------------------------------------------
+// Convergent with thupalo/sap-rfc-mcp-server `get_metadata_cache_stats`.
+// Returns hits/misses/entries/evictions/hit_ratio for the RFC metadata cache.
+
+fn tool_system_cache_stats(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |_args: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            match &ctx.metadata_cache {
+                None => render_json("sap.system.cache_stats", &serde_json::json!({
+                    "enabled": false,
+                    "note": "RFC metadata cache is disabled. Restart the server with --metadata-cache-ttl-secs > 0.",
+                })),
+                Some(cache) => {
+                    let s = cache.stats().await;
+                    render_json("sap.system.cache_stats", &serde_json::json!({
+                        "enabled": true,
+                        "hits": s.hits,
+                        "misses": s.misses,
+                        "entries": s.entries,
+                        "evictions": s.evictions,
+                        "hit_ratio": s.hit_ratio(),
+                    }))
+                }
+            }
+        }
+    });
+    ToolDescriptor::new(
+        "sap.system.cache_stats",
+        Some("Read RFC metadata cache statistics (thupalo/sap-rfc-mcp-server pattern). Returns hits, misses, entries, evictions, and hit_ratio. Always read-only — touches local cache state only, never SAP.".into()),
+        ToolInputSchema::from_value(serde_json::json!({"type": "object", "additionalProperties": false})),
+        Arc::new(handler),
+    )
+}
+
+// --- sap.system.cache_invalidate -------------------------------------------
+// Operator escape hatch for the case where an upstream transport import has
+// changed an RFC signature and the cached metadata is now stale.  Read-only
+// from the SAP-state perspective (we never write to SAP), but it does mutate
+// the local cache, so the description is explicit.
+
+fn tool_system_cache_invalidate(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |_args: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            match &ctx.metadata_cache {
+                None => render_json("sap.system.cache_invalidate", &serde_json::json!({
+                    "enabled": false,
+                    "note": "RFC metadata cache is disabled. Nothing to invalidate.",
+                })),
+                Some(cache) => {
+                    let before = cache.stats().await.entries;
+                    cache.invalidate_all().await;
+                    render_json("sap.system.cache_invalidate", &serde_json::json!({
+                        "ok": true,
+                        "entries_dropped": before,
+                    }))
+                }
+            }
+        }
+    });
+    ToolDescriptor::new(
+        "sap.system.cache_invalidate",
+        Some("Drop every entry in the RFC metadata cache so the next sap.rfc.metadata / bulk_metadata call re-fetches from SAP. Use after a transport import that changed RFC signatures. Does not touch SAP state.".into()),
+        ToolInputSchema::from_value(serde_json::json!({"type": "object", "additionalProperties": false})),
+        Arc::new(handler),
+    )
 }
 
 // --- sap.system.health -----------------------------------------------------

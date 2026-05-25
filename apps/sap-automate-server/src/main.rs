@@ -17,11 +17,7 @@
 //!   in `initialize.instructions`.
 //! - **Structured SAP error taxonomy** mapped to MCP JSON-RPC error codes.
 
-mod context;
-mod seed;
-mod tools;
-mod resources;
-mod prompts;
+use sap_automate_server_lib::{context, prompts, resources, seed, tools};
 
 use clap::Parser;
 use mcp_server::Server;
@@ -36,8 +32,10 @@ use sap_automate_kb::{InMemoryKb, KnowledgeStore};
 use sap_automate_rag::RagEngine;
 use sap_automate_rfc::{
     Credentials, CredentialProvider, CredentialSource, EnvCredentialProvider,
-    LayeredCredentialProvider, MockSapClient, SapClient, StaticCredentialProvider,
+    LayeredCredentialProvider, MetadataCache, MockSapClient, SapClient,
+    StaticCredentialProvider,
 };
+use std::time::Duration;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
@@ -87,6 +85,14 @@ struct Cli {
     /// Optional bearer token required for HTTP requests.
     #[arg(long)]
     bearer_token: Option<String>,
+
+    /// TTL in seconds for the RFC metadata cache (thupalo/sap-rfc-mcp-server
+    /// pattern).  `0` disables caching — every `sap.rfc.metadata` and
+    /// `sap.rfc.bulk_metadata` call falls through to the backend.
+    /// Default 300 (5 minutes) matches the inter-transport-import horizon
+    /// most SAP basis teams maintain.
+    #[arg(long, default_value_t = 300)]
+    metadata_cache_ttl_secs: u64,
 }
 
 #[tokio::main]
@@ -137,7 +143,20 @@ async fn main() -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("no credentials available"))?;
     tracing::info!(identity = %creds.redacted(), "SAP identity resolved");
 
-    let sap_client: Arc<dyn SapClient> = MockSapClient::new(cli.pool_size, creds.redacted());
+    let inner_sap_client = MockSapClient::new(cli.pool_size, creds.redacted());
+
+    // Decorate with a TTL metadata cache when configured.  When TTL=0 we
+    // still build the cache (with TTL::ZERO so it acts as a pass-through
+    // counter) so the cache-stats tool always has a sink — operators get
+    // miss-count visibility even when caching is "off".
+    let cache_ttl = Duration::from_secs(cli.metadata_cache_ttl_secs);
+    let metadata_cache = MetadataCache::new(inner_sap_client.clone(), cache_ttl);
+    let sap_client: Arc<dyn SapClient> = metadata_cache.clone();
+    let metadata_cache_handle = Some(metadata_cache);
+    tracing::info!(
+        cache_ttl_secs = cli.metadata_cache_ttl_secs,
+        "RFC metadata cache active (thupalo pattern)"
+    );
 
     // ADT client — defaults to MockAdtClient so the binary runs offline.
     let adt_destination = AdtDestination::mock(cli.adt_destination.clone().unwrap_or_else(|| "default".into()));
@@ -163,6 +182,7 @@ async fn main() -> anyhow::Result<()> {
         graph: graph_engine,
         embedder,
         sap_client,
+        metadata_cache: metadata_cache_handle,
         adt_client,
         read_only,
         agents_md: agents_md.clone(),
@@ -283,10 +303,10 @@ fn build_instructions(agents_md: &Option<String>, read_only: bool) -> String {
     s.push_str(
         "SAP-Automate MCP server (Phase 2 + ADT). Tool groups:\n\
          - RAG search: abap.search, bpmn.find_process, eam.search_apps, sap.help.search, sap.docs.search.\n\
-         - RFC + tables: sap.system.info, sap.rfc.search, sap.rfc.metadata, sap.rfc.bulk_metadata, sap.rfc.call, sap.table.read, sap.table.structure.\n\
+         - RFC + tables: sap.system.info, sap.system.health, sap.system.cache_stats, sap.system.cache_invalidate, sap.rfc.search, sap.rfc.metadata, sap.rfc.bulk_metadata, sap.rfc.call, sap.table.read, sap.table.structure.\n\
          - ABAP ADT (read-only): abap.adt.get_program, abap.adt.get_class, abap.adt.get_function_module, abap.adt.get_interface, abap.adt.get_include, abap.adt.get_package_contents, abap.adt.get_cds_view, abap.adt.where_used, abap.adt.search, abap.adt.get_table_contents.\n\
          - ABAP ADT (write): abap.adt.activate (hidden in read-only mode).\n\
-         Resources: sap-system://info, sap-rfc://{name}, sap-table://{name}/structure, adt-destination://info, agents://guardrails.\n\
+         Resources: sap-system://info, sap-rfc://{name}, sap-table://{name}/structure, adt-destination://info, sap-cache://stats, agents://guardrails.\n\
          Prompts: sap.review-rfc-call, sap.transport-impact-analysis, abap.review-where-used.\n",
     );
     if read_only {

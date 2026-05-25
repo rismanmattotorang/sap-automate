@@ -68,6 +68,22 @@ impl Synthetic {
                 points: 2_980 + (self.tick % 10),
                 staleness_pct: 0.9,
             }),
+            // Synthetic RFC metadata cache snapshot.  Hit ratio climbs from
+            // 0 to ~0.85 over the first ~80 ticks, then jitters in
+            // steady-state — mirrors the warming-curve operators see on a
+            // freshly-started server.
+            3 => {
+                let total = self.tick.max(1);
+                let hits = ((total as f64 * 0.85).min((self.tick.saturating_sub(8)) as f64)) as u64;
+                let misses = total.saturating_sub(hits);
+                let hit_ratio = if total == 0 { 0.0 } else { hits as f64 / total as f64 };
+                Some(TrafficEvent::CacheStat {
+                    hits,
+                    misses,
+                    entries: (16 + (self.tick % 12) as usize).min(28),
+                    hit_ratio,
+                })
+            }
             19 => {
                 if self.tick.is_multiple_of(200) {
                     Some(TrafficEvent::Log {

@@ -15,6 +15,63 @@ and re-reading the six reference SAP MCP servers tracked in
 "Simplicity First / Surgical Changes" discipline — additive only,
 no rewrites.
 
+### Apps-layer pass (2026-05-25 — same release window)
+
+Closes the loop on the metadata-cache work above by wiring it through
+every app surface, verifying it end-to-end with binary integration
+tests, and exposing it to operators (TUI + web).
+
+#### Server (`apps/sap-automate-server`)
+
+- **Wires `MetadataCache`** as a decorator over `MockSapClient` (also
+  ready for any future `NetweaverSapClient`). New CLI flag
+  `--metadata-cache-ttl-secs` (default `300`; `0` makes the cache a
+  pass-through counter so operators still get hit/miss visibility).
+- **`sap.system.cache_stats`** MCP tool — read-only, returns
+  `{ enabled, hits, misses, entries, evictions, hit_ratio }`.
+  Convergent with `thupalo/sap-rfc-mcp-server`'s
+  `get_metadata_cache_stats`.
+- **`sap.system.cache_invalidate`** MCP tool — operator escape hatch
+  for the case where an upstream transport import changed an RFC
+  signature and cached metadata is stale. Mutates only local state,
+  never SAP.
+- **`sap-cache://stats`** MCP resource — same JSON, surfaced through
+  `resources/read`.
+- **3 binary integration tests** (`apps/sap-automate-server/tests/cache_tools.rs`)
+  spawn the compiled server, list tools/resources, call
+  `sap.rfc.metadata` twice, and verify the hit counter moves —
+  Karpathy goal-driven verify loop.
+
+#### TUI (`apps/sap-automate-tui`)
+
+- New `TrafficEvent::CacheStat` variant + `CacheSnapshot` in the
+  state machine.
+- **Cache row** at the bottom of the KB tab (hits / misses /
+  entries / hit_ratio) with the same green/yellow/red threshold
+  styling as the other gauges.
+- Synthetic feed emits a cache snapshot every 23 ticks so the row is
+  exercised offline.
+
+#### Gateway (`apps/sap-automate-gw`)
+
+- **Skill-aware routing** — `match_skill()` maps user-intent keywords
+  to `sap.skill.*` prompts and invokes them via `prompts/get` before
+  falling back to raw tool calls. Honours the convergent
+  `marianfoo/sap-ai-mcp-servers` insight that *agents should invoke
+  skills, not raw tools*. Eight intents routed: SoD audit, BW
+  migration, period close, ABAP code review, OData design, transport
+  impact, Clean Core audit, Karpathy guidelines pre-flight.
+
+#### Web (`apps/web`)
+
+- **Cache panel on the Operations page** — polls
+  `sap.system.cache_stats` every 2 s, renders hits / misses /
+  entries / evictions in stat tiles + a hit-ratio progress bar
+  (green ≥80%, yellow ≥50%, red <50%).
+- **Skill Lab "Why this matters"** updated to credit the Karpathy
+  convergence alongside `mdk-mcp-server` / `fr0ster/mcp-abap-adt` /
+  `marianfoo/sap-ai-mcp-servers`.
+
 ### Added
 
 - **`skills/karpathy-guidelines.md`** — port of Multica's
@@ -48,11 +105,13 @@ no rewrites.
 ### Changed
 
 - Skill count: **8 → 13** auto-discovered skills.
-- Test count: **104 → 110** passing tests (+6 `metadata_cache` tests).
+- MCP tool count: **32 → 34** (`sap.system.cache_stats`, `sap.system.cache_invalidate`).
+- MCP resource count: **11 → 12** (`sap-cache://stats`).
 - MCP prompts surfaced via `prompts/list`: **11 → 16**.
+- Test count: **104 → 113** passing tests (+6 `metadata_cache` +3 server-binary integration).
 - `README.md` — refreshed credits, added skill table, repository-layout
   blurb; added `MetadataCache (TTL)` mention in `sap-automate-rfc`
-  description.
+  description; bumped tool / resource counts.
 
 ### Notes
 
