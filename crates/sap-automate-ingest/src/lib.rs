@@ -10,9 +10,15 @@
 pub mod chunker;
 pub mod crawler;
 pub mod embed;
+pub mod fit_markdown;
 pub mod pipeline;
+pub mod rate_limit;
+pub mod robots;
 
 pub use chunker::{chunk_document, ChunkerConfig};
 pub use crawler::{HelpPortalCrawler, ParsedPage, parse_help_portal_html};
 pub use embed::{EmbeddingClient, EmbeddingError, MockEmbedder, OpenAiEmbedder};
+pub use fit_markdown::{fit_markdown_filter, FitConfig, FitStats};
 pub use pipeline::{IngestionPipeline, IngestionReport};
+pub use rate_limit::RateLimiter;
+pub use robots::{Decision, RobotsTxt};

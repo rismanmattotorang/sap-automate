@@ -15,6 +15,64 @@ and re-reading the six reference SAP MCP servers tracked in
 "Simplicity First / Surgical Changes" discipline — additive only,
 no rewrites.
 
+### KB + RAG pass (2026-05-25 — same release window)
+
+Third pass: extends the knowledge / retrieval layer with the convergent
+patterns from [`VectifyAI/OpenKB`](https://github.com/VectifyAI/OpenKB) +
+[`VectifyAI/PageIndex`](https://github.com/VectifyAI/PageIndex) (hierarchical
+document tree) and [`unclecode/crawl4ai`](https://github.com/unclecode/crawl4ai)
+(robots.txt, rate-limit, "fit markdown" boilerplate filter), plus
+retrieval transparency that operators have been asking for.
+
+#### Knowledge base (`crates/sap-automate-kb`)
+
+- **`doc_tree::DocumentTree`** — deterministic hierarchical tree built
+  from a document's headings (Markdown ATX `#`/`##`/`###`, numbered
+  sections like `1.2.3.`, or `SECTION:` keyword markers). Each node
+  carries title, extractive 2-sentence summary, byte range, approx token
+  count, and children. The OpenKB + PageIndex *data structure* without
+  the LLM-at-build-time dependency.
+- **`KnowledgeStore::get_document_tree(id)`** — default-impl trait
+  method using the new builder. Production backends can override to
+  cache the tree alongside the document.
+- **Content-hash dedup** at chunk upsert: writing the same `(chunk_id, text)`
+  twice is a no-op, surfaced via `UpsertStats::chunks_dedup_skipped`.
+  Pre-empts a real foot-gun where a re-crawl with unchanged content was
+  rewriting the same rows.
+
+#### RAG (`crates/sap-automate-rag`)
+
+- **`RetrievalDiagnostics`** field on `SearchResponse`: dense / sparse
+  candidate counts, RRF overlap (consensus signal), tokenised query
+  terms (so the operator sees *what* BM25 actually searched for),
+  reranker-ran flag, truncated-by-top-k flag. Pure additive; ordering
+  unchanged.
+- `RagEngine::store()` accessor so tools can reach the underlying
+  `KnowledgeStore` without re-plumbing.
+
+#### Server (`apps/sap-automate-server`)
+
+- **`sap.kb.navigate`** MCP tool — walks the document tree by dotted
+  path (`"1.2.1"`) with a bounded `depth`. Convergent OpenKB +
+  PageIndex pattern: for long SAP Help pages and ABAP source files,
+  section-by-section navigation beats similarity-blind retrieval.
+- 4 in-process binary integration tests under
+  `tests/kb_navigate.rs` covering registration, root walk, dotted-path
+  navigation, and missing-doc error path.
+
+#### Crawler (`crates/sap-automate-ingest`)
+
+- **`robots::RobotsTxt`** — RFC 9309-subset parser with
+  most-specific-agent matching, longest-prefix Allow/Disallow,
+  `Crawl-delay:` extraction. 7 unit tests.
+- **`rate_limit::RateLimiter`** — per-host token-bucket spacing,
+  default plus per-host overrides from `Crawl-delay:`. 5 unit tests.
+- **`fit_markdown::fit_markdown_filter`** — Crawl4AI's BM25-based
+  block-level content filter. Scores paragraphs against a topic
+  (typically the page title), drops nav/footer/cookie-banner
+  boilerplate while always keeping long blocks. Returns `FitStats`
+  (retention ratios). 4 unit tests.
+
 ### Apps-layer pass (2026-05-25 — same release window)
 
 Closes the loop on the metadata-cache work above by wiring it through
@@ -105,13 +163,14 @@ tests, and exposing it to operators (TUI + web).
 ### Changed
 
 - Skill count: **8 → 13** auto-discovered skills.
-- MCP tool count: **32 → 34** (`sap.system.cache_stats`, `sap.system.cache_invalidate`).
+- MCP tool count: **32 → 35** (cache_stats, cache_invalidate, kb.navigate).
 - MCP resource count: **11 → 12** (`sap-cache://stats`).
 - MCP prompts surfaced via `prompts/list`: **11 → 16**.
-- Test count: **104 → 113** passing tests (+6 `metadata_cache` +3 server-binary integration).
+- Test count: **104 → 145** passing tests (+6 metadata_cache +3 cache-tools +6 doc_tree +3 store-dedup/tree +2 RAG-diagnostics +7 robots +5 rate-limit +4 fit-markdown +4 kb_navigate +1 misc).
 - `README.md` — refreshed credits, added skill table, repository-layout
   blurb; added `MetadataCache (TTL)` mention in `sap-automate-rfc`
-  description; bumped tool / resource counts.
+  description; bumped tool / resource counts; credited OpenKB+PageIndex
+  and Crawl4AI as the references for the KB+RAG+crawler pass.
 
 ### Notes
 

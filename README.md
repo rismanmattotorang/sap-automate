@@ -4,12 +4,12 @@
 
 **The Rust-native, MCP-native agentic interface for SAP S/4HANA.**
 
-*Sub-millisecond retrieval · 113 SAP-correctness tests · On-premise capable · Apache-2.0*
+*Sub-millisecond retrieval · 145 SAP-correctness tests · On-premise capable · Apache-2.0*
 
 Built by the **ParagonCorp TPO R&D Team**.
 
 [![CI](https://img.shields.io/badge/CI-passing-22c55e?style=flat-square&logo=githubactions)](.github/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-113%20passing-22d3ee?style=flat-square)](#tests)
+[![Tests](https://img.shields.io/badge/tests-145%20passing-22d3ee?style=flat-square)](#tests)
 [![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange?style=flat-square&logo=rust)](https://www.rust-lang.org)
 [![MCP](https://img.shields.io/badge/MCP-2025--06--18-8b5cf6?style=flat-square)](https://modelcontextprotocol.io)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
@@ -140,11 +140,11 @@ Every layer is a trait-based seam: `KnowledgeStore`, `EmbeddingClient`, `SapClie
 
 ## What's inside
 
-**34 production MCP tools** across 5 domains:
+**35 production MCP tools** across 5 domains:
 
 | Domain | Tools |
 |---|---|
-| **RAG search** (5) | `abap.search`, `bpmn.find_process`, `eam.search_apps`, `sap.help.search`, `sap.docs.search` |
+| **RAG search** (6) | `abap.search`, `bpmn.find_process`, `eam.search_apps`, `sap.help.search`, `sap.docs.search`, `sap.kb.navigate` (PageIndex-style hierarchical document-tree walker) |
 | **SAP system / RFC / tables** (12) | `sap.system.info`, `sap.system.health`, `sap.system.cache_stats`, `sap.system.cache_invalidate`, `sap.rfc.search`, `sap.rfc.metadata`, `sap.rfc.bulk_metadata`, `sap.rfc.call`, `sap.table.read`, `sap.table.structure`, `sap.bapi.parse_return`, `sap.docs.search` |
 | **ABAP ADT** (11) | `abap.adt.get_program`, `…get_class`, `…get_interface`, `…get_include`, `…get_function_module`, `…get_package_contents`, `…get_cds_view`, `…search`, `…where_used`, `…get_table_contents`, `…activate` (write, gated) |
 | **Knowledge graph** (4) | `kb.multi_hop` (HippoRAG), `kb.global_query` (GraphRAG), `kb.summarise` (RAPTOR), `kb.graph_neighborhood` |
@@ -165,7 +165,7 @@ The skill library bundles **behavioural guidelines** alongside SAP workflows:
 
 ## Production posture
 
-- ✅ **113 tests passing** (unit + 17 ADT integration tests against a mock SAP server + 7 SAP-precision tests + 4 elicitation round-trips + 4 channel/scheduler/memory tests + 6 RFC metadata-cache tests + 3 server-binary integration tests for the cache tool surface)
+- ✅ **145 tests passing** (unit + 17 ADT integration tests against a mock SAP server + 7 SAP-precision tests + 4 elicitation round-trips + 4 channel/scheduler/memory tests + 6 RFC metadata-cache tests + 3 cache-tools binary integration tests + 6 document-tree builder tests + 2 KB-dedup tests + 1 default-tree-builder test + 2 RAG-diagnostics tests + 7 robots.txt parser tests + 5 rate-limiter tests + 4 fit-markdown filter tests + 4 kb-navigate binary integration tests)
 - ✅ **Read-only by default**, `--enable-writes` to flip
 - ✅ **Structured error taxonomy** mapped to MCP JSON-RPC error codes (transient / permanent / degraded)
 - ✅ **AGENTS.md guardrails** loaded from disk; surfaced in `initialize.instructions` and as MCP resource
@@ -188,10 +188,10 @@ sap-automate/
 │   ├── mcp-client/                  async client + ElicitationDelegate
 │   ├── sap-automate-rfc/            SapClient + RFC catalogue + BAPIRET2 parser + MetadataCache (TTL)
 │   ├── sap-automate-adt/            AdtClient (HTTP + mock; CSRF cache)
-│   ├── sap-automate-kb/             KB schema + InMemory + Qdrant
-│   ├── sap-automate-rag/            Hybrid RAG + reranker + graph layers
+│   ├── sap-automate-kb/             KB schema + InMemory + Qdrant + DocumentTree (PageIndex)
+│   ├── sap-automate-rag/            Hybrid RAG + reranker + graph layers + RetrievalDiagnostics
 │   ├── sap-automate-graph/          Entities + Louvain + PPR + RAPTOR
-│   ├── sap-automate-ingest/         Crawler + chunker + embedder
+│   ├── sap-automate-ingest/         Crawler + chunker + embedder + robots.txt + rate-limit + fit-markdown filter
 │   ├── sap-automate-memory/         Working + episodic four-tier memory
 │   ├── sap-automate-scheduler/      TOML-declared proactive jobs
 │   ├── sap-automate-channels/       Teams / Slack / Telegram / CLI adapters
@@ -247,6 +247,8 @@ SAP-Automate is built and maintained by the **ParagonCorp Technology Product Own
 Reference designs studied while building this:
 
 - [`multica-ai/andrej-karpathy-skills`](https://github.com/multica-ai/andrej-karpathy-skills) — behavioural-guidelines skill format (think-before-coding, simplicity, surgical changes, goal-driven execution); ported into `skills/karpathy-guidelines.md`
+- [`VectifyAI/OpenKB`](https://github.com/VectifyAI/OpenKB) + [`VectifyAI/PageIndex`](https://github.com/VectifyAI/PageIndex) — hierarchical document-tree pattern (compile-time tree, query-time agent reasoning); ported as `sap_automate_kb::DocumentTree` + the `sap.kb.navigate` MCP tool
+- [`unclecode/crawl4ai`](https://github.com/unclecode/crawl4ai) — robots.txt respect, per-host rate limiting, BM25-based "fit markdown" boilerplate filter; ported as `sap_automate_ingest::robots` / `rate_limit` / `fit_markdown` modules
 - [`thupalo/sap-rfc-mcp-server`](https://github.com/thupalo/sap-rfc-mcp-server) — connection pooling + metadata cache patterns; TTL cache decorator now lives in `crates/sap-automate-rfc/src/metadata_cache.rs`
 - [`CDataSoftware/sap-erp-mcp-server-by-cdata`](https://github.com/CDataSoftware/sap-erp-mcp-server-by-cdata) — read-only-by-default safety property
 - [`SAP/mdk-mcp-server`](https://github.com/SAP/mdk-mcp-server) — AGENTS.md + constrained-enum tool params

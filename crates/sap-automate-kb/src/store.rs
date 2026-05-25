@@ -1,5 +1,6 @@
 //! Knowledge store trait + in-memory implementation.
 
+use crate::doc_tree::{build_document_tree, DocumentTree};
 use crate::schema::{Chunk, ChunkId, Document, DocumentId, Domain};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -98,6 +99,35 @@ pub trait KnowledgeStore: Send + Sync {
 
     /// Total stored chunk count, for index-freshness dashboards.
     async fn chunk_count(&self) -> Result<usize, StoreError>;
+
+    /// Build (or retrieve) the hierarchical document tree for a document.
+    /// OpenKB + PageIndex convergent pattern: lets an agent navigate a long
+    /// document by section path instead of doing similarity-blind retrieval.
+    ///
+    /// Default impl is deterministic and on-demand: fetch the document, run
+    /// `build_document_tree`.  Production backends with persistent storage
+    /// should override to cache the tree alongside the document.
+    async fn get_document_tree(&self, id: &DocumentId) -> Result<Option<DocumentTree>, StoreError> {
+        match self.get_document(id).await? {
+            None => Ok(None),
+            Some(doc) => Ok(Some(build_document_tree(&doc))),
+        }
+    }
+
+    /// Upsert counters surfaced for telemetry.  Default `0/0` keeps backends
+    /// that don't track dedup statistics from having to lie.
+    fn upsert_stats(&self) -> UpsertStats {
+        UpsertStats::default()
+    }
+}
+
+/// Lifetime upsert counters.  `dedup_skipped` increments when the store
+/// recognises a chunk by `content_hash(text)` and elects to skip the write.
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
+pub struct UpsertStats {
+    pub chunks_written: u64,
+    pub chunks_dedup_skipped: u64,
+    pub documents_written: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -108,6 +138,11 @@ pub trait KnowledgeStore: Send + Sync {
 pub struct InMemoryKb {
     documents: RwLock<HashMap<DocumentId, Document>>,
     chunks: RwLock<HashMap<ChunkId, Chunk>>,
+    /// Content hash → set of chunk ids that already store that body.
+    /// Used by the dedup path in `upsert`: a chunk whose `content_hash(text)`
+    /// is already present *under the same id* is a no-op write.
+    content_hashes: RwLock<HashMap<ChunkId, String>>,
+    stats: RwLock<UpsertStats>,
 }
 
 impl InMemoryKb {
@@ -116,18 +151,32 @@ impl InMemoryKb {
     /// Synchronous, infallible upsert for sync seed code (no .await needed).
     pub fn insert_document(&self, doc: Document) {
         self.documents.write().unwrap().insert(doc.id.clone(), doc);
+        self.stats.write().unwrap().documents_written += 1;
     }
 
     pub fn insert_chunk(&self, chunk: Chunk) {
+        let hash = crate::schema::content_hash(&chunk.text);
+        let mut hashes = self.content_hashes.write().unwrap();
+        if hashes.get(&chunk.id).is_some_and(|h| h == &hash) {
+            self.stats.write().unwrap().chunks_dedup_skipped += 1;
+            return;
+        }
+        hashes.insert(chunk.id.clone(), hash);
+        drop(hashes);
         self.chunks.write().unwrap().insert(chunk.id.clone(), chunk);
+        self.stats.write().unwrap().chunks_written += 1;
     }
 }
 
 #[async_trait]
 impl KnowledgeStore for InMemoryKb {
     async fn upsert(&self, batch: UpsertBatch) -> Result<(), StoreError> {
-        for d in batch.documents { self.insert_document(d); }
-        for c in batch.chunks { self.insert_chunk(c); }
+        for d in batch.documents {
+            self.insert_document(d);
+        }
+        for c in batch.chunks {
+            self.insert_chunk(c);
+        }
         Ok(())
     }
 
@@ -160,6 +209,10 @@ impl KnowledgeStore for InMemoryKb {
 
     async fn chunk_count(&self) -> Result<usize, StoreError> {
         Ok(self.chunks.read().unwrap().len())
+    }
+
+    fn upsert_stats(&self) -> UpsertStats {
+        *self.stats.read().unwrap()
     }
 }
 
@@ -323,5 +376,46 @@ mod tests {
     fn content_hash_stable() {
         assert_eq!(content_hash("hello"), content_hash("hello"));
         assert_ne!(content_hash("hello"), content_hash("Hello"));
+    }
+
+    #[tokio::test]
+    async fn upsert_dedup_skips_identical_chunk() {
+        let kb = InMemoryKb::new();
+        let chunk = sample_chunk("c-1", Domain::SapHelp, "identical body", None);
+        kb.insert_chunk(chunk.clone());
+        kb.insert_chunk(chunk.clone());
+        kb.insert_chunk(chunk.clone());
+        assert_eq!(kb.chunk_count().await.unwrap(), 1);
+        let s = kb.upsert_stats();
+        assert_eq!(s.chunks_written, 1);
+        assert_eq!(s.chunks_dedup_skipped, 2);
+    }
+
+    #[tokio::test]
+    async fn upsert_dedup_treats_changed_text_as_new() {
+        let kb = InMemoryKb::new();
+        let c1 = sample_chunk("c-1", Domain::SapHelp, "v1", None);
+        let c2 = sample_chunk("c-1", Domain::SapHelp, "v2", None);
+        kb.insert_chunk(c1);
+        kb.insert_chunk(c2);
+        // Same id, different text: the second write wins (overwrite), but
+        // the dedup counter does not advance.
+        let s = kb.upsert_stats();
+        assert_eq!(s.chunks_written, 2);
+        assert_eq!(s.chunks_dedup_skipped, 0);
+    }
+
+    #[tokio::test]
+    async fn get_document_tree_uses_default_builder() {
+        let kb = InMemoryKb::new();
+        let doc = Document::new(
+            "sap_help:demo", Domain::SapHelp, "u", "Demo",
+            "# Top\nbody\n## Sub\nmore\n",
+        );
+        kb.insert_document(doc.clone());
+        let tree = kb.get_document_tree(&doc.id).await.unwrap().unwrap();
+        assert_eq!(tree.document_id, "sap_help:demo");
+        assert!(tree.node_count() >= 3);
+        assert_eq!(tree.max_depth, 2);
     }
 }
