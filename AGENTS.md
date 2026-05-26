@@ -30,8 +30,12 @@ pass.
 
 ## Read-only by default
 
-- Production / QA systems: use `sap.docs.search`, `sap.system.info`, `sap.rfc.search`,
-  `sap.rfc.metadata`, `sap.rfc.bulk_metadata`, `sap.table.read`, `sap.table.structure`,
+- Production / QA systems: use `sap.docs.search`, `sap.system.info`,
+  `sap.system.health`, `sap.system.cache_stats`, `sap.system.cache_invalidate`,
+  `sap.rfc.search`, `sap.rfc.metadata`, `sap.rfc.bulk_metadata`,
+  `sap.table.read`, `sap.table.structure`, `sap.bapi.parse_return`,
+  `sap.bp.search`, `sap.bp.get`,
+  `sap.kb.navigate`,
   `abap.adt.get_program`, `abap.adt.get_class`, `abap.adt.get_interface`,
   `abap.adt.get_include`, `abap.adt.get_function_module`, `abap.adt.get_cds_view`,
   `abap.adt.get_package_contents`, `abap.adt.where_used`, `abap.adt.search`,

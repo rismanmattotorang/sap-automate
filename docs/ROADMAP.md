@@ -141,9 +141,34 @@ Phase 1A trait surfaces (`KnowledgeStore`, `EmbeddingClient`,
 
 ---
 
-# Post-v1.1 Forward Plan
+# Post-v1.3 Forward Plan
 
-> **v1.1.0 is the convergence-pass release, not the finish line.**  All paper phases (P1–P9) plus three Karpathy-style convergence passes are shipped; the codebase has 145 tests passing, sub-millisecond P95 retrieval, production K8s manifests, a polished agentic surface, and a hierarchical doc-tree navigation surface (OpenKB + PageIndex pattern).  Everything below is what we build *next*, anchored to the four strategic themes that turn this project from "best-in-class open source" into "the category-defining SAP-agent platform".
+> **v1.3.0 is the live-backend release, not the finish line.**  All paper phases (P1–P9), three convergence passes (v1.1), the MCP spec utilities (v1.2), and the SAP Business Hub OData v4 integration (v1.3) are shipped; the codebase has **172 tests passing**, sub-millisecond P95 retrieval, production K8s manifests, a polished agentic surface, hierarchical doc-tree navigation (OpenKB + PageIndex pattern), and a working "Live SAP backend" tier via the SAP Business Accelerator Hub sandbox.  Everything below is what we build *next*, anchored to the four strategic themes that turn this project from "best-in-class open source" into "the category-defining SAP-agent platform".
+
+## v1.3.0 — state of the union (released 2026-05-25)
+
+What v1.3 added on top of v1.2:
+
+| Surface | What shipped | Notes |
+|---|---|---|
+| Live SAP backend | **`BusinessHubClient`** against `sandbox.api.sap.com` | OData v4 `API_BUSINESS_PARTNER`; `APIKey` header auth; gated on `SAP_BUSINESS_HUB_KEY`; skips cleanly in CI without secrets |
+| MCP tools | **35 → 37** | + `sap.bp.search`, `sap.bp.get` |
+| Crate features | `sap-automate-rfc/odata` feature | pulls `reqwest`; non-default so the baseline crate stays minimal |
+| Docs | **`docs/INTEGRATION.md`** | 3-tier strategy: CI / Demo (Business Hub) / Power-user (ABAP Trial Docker) |
+| Tests | **159 → 172** | +8 odata module +5 BP MCP-tool integration |
+
+## v1.2.0 — state of the union (released 2026-05-25)
+
+What v1.2 added on top of v1.1:
+
+| Surface | What shipped | Notes |
+|---|---|---|
+| MCP spec utilities | `logging/setLevel` + `completion/complete` | atomic per-server log level; pluggable per-prompt argument completer |
+| MCP notifications types | `notifications/{message,progress,cancelled}` wire model | `LogLevel`, `ProgressToken`, `ProgressParams`, `CancelledParams` in `mcp-core` |
+| HTTP transport | `allowed_origins` allowlist (DNS-rebinding mitigation, spec §4.6) | `--allowed-origin` repeatable CLI flag; applies to `/mcp` + `/mcp/events` |
+| Server capabilities | `logging` + `completions` advertised when wired | clients negotiate against the real feature set |
+| Client surface | `set_log_level`, `complete_prompt_argument`, `raw_request<R>` | typed helpers + forwards-compat escape hatch |
+| Tests | **145 → 159** | +6 spec_utilities +8 HTTP unit |
 
 ## v1.1.0 — state of the union (released 2026-05-25)
 

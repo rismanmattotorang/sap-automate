@@ -286,6 +286,7 @@ sap-automate/
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Phased delivery plan with current status per release |
 | [`docs/SAP_CORRECTNESS.md`](docs/SAP_CORRECTNESS.md) | Every fixture mapped to its SAP source-of-truth |
 | [`docs/COMPARISON.md`](docs/COMPARISON.md) | Side-by-side analysis vs reference SAP MCP servers |
+| [`docs/INTEGRATION.md`](docs/INTEGRATION.md) | Three-tier SAP integration strategy: CI mocks / SAP Business Hub sandbox / ABAP Platform Trial Docker |
 | [`deploy/k8s/README.md`](deploy/k8s/README.md) | Production deployment runbook |
 | [`AGENTS.md`](AGENTS.md) | Default agent guardrails (per-deployment overridable) |
 | [`CHANGELOG.md`](CHANGELOG.md) | Release history |
@@ -332,6 +333,8 @@ So we built our own, then released it under Apache-2.0 — because the cost of b
 
 ## Reference designs studied while building this
 
+- [`modelcontextprotocol/spec`](https://github.com/modelcontextprotocol) — canonical MCP 2025-06-18 specification; informs `logging/setLevel`, `completion/complete`, HTTP `Origin` validation, capability negotiation
+- [SAP Business Accelerator Hub](https://api.sap.com/) — sandbox host pattern + `APIKey` header convention; informs `BusinessHubClient` + `sap.bp.*` MCP tools (`docs/INTEGRATION.md`)
 - [`VectifyAI/OpenKB`](https://github.com/VectifyAI/OpenKB) + [`VectifyAI/PageIndex`](https://github.com/VectifyAI/PageIndex) — hierarchical document-tree pattern; informs `sap_automate_kb::DocumentTree` + the `sap.kb.navigate` MCP tool
 - [`unclecode/crawl4ai`](https://github.com/unclecode/crawl4ai) — robots.txt respect, per-host rate limiting, BM25-based fit-markdown boilerplate filter; informs `sap_automate_ingest::{robots, rate_limit, fit_markdown}`
 - [`thupalo/sap-rfc-mcp-server`](https://github.com/thupalo/sap-rfc-mcp-server) — connection pooling + metadata cache patterns; informs `MetadataCache` TTL decorator
