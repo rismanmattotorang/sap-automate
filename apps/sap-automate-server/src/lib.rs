@@ -78,6 +78,7 @@ pub async fn build_test_server(
         sap_client,
         metadata_cache: Some(metadata_cache),
         adt_client,
+        business_hub: None,
         read_only: opts.read_only,
         agents_md: opts.agents_md.clone(),
     });

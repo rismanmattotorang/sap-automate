@@ -3,7 +3,7 @@
 use sap_automate_adt::AdtClient;
 use sap_automate_ingest::EmbeddingClient;
 use sap_automate_rag::{GraphEngine, RagEngine};
-use sap_automate_rfc::{MetadataCache, MockSapClient, SapClient};
+use sap_automate_rfc::{BusinessHubClient, MetadataCache, MockSapClient, SapClient};
 use std::sync::Arc;
 
 pub struct ServerContext {
@@ -19,6 +19,10 @@ pub struct ServerContext {
     /// when caching is disabled via `--metadata-cache-ttl-secs=0`.
     pub metadata_cache: Option<Arc<MetadataCache<MockSapClient>>>,
     pub adt_client: Arc<dyn AdtClient>,
+    /// SAP Business Accelerator Hub sandbox client.  `None` when no
+    /// `SAP_BUSINESS_HUB_KEY` is configured — the `sap.bp.*` tools then
+    /// return a friendly "feature disabled" error instead of crashing.
+    pub business_hub: Option<Arc<BusinessHubClient>>,
     pub read_only: bool,
     pub agents_md: Option<String>,
 }

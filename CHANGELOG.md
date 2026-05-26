@@ -6,6 +6,73 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [1.3.0] — 2026-05-25  ·  Live SAP backend tier (Business Hub sandbox)
+
+Adds the second integration testing tier: live OData v4 against the
+**SAP Business Accelerator Hub sandbox**.  The first piloted endpoint
+is the `API_BUSINESS_PARTNER` v4 service (richest schema, read-stable
+across releases).  Additive — no breaking changes.
+
+### Added — OData client
+
+- **`sap_automate_rfc::odata`** module behind feature `odata`.
+  - `BusinessHubConfig` — service-specific config; ships with
+    `business_partner_sandbox(api_key)`.
+  - `BusinessHubClient` — async `reqwest` client with `APIKey` header
+    auth, 15 s timeout, OData v4 `$filter` / `$select` / `$top` query
+    building, `$filter`-quote escaping per OData §5.1.1.6.1.
+  - `BusinessPartner` typed projection of the V4 `A_BusinessPartner`
+    entity (id, full name, category, organization name, first/last
+    name, grouping, creation date).
+  - `BusinessHubClient::from_env()` builds a sandbox client from
+    `SAP_BUSINESS_HUB_KEY`; returns `None` when unset so CI without
+    secrets skips silently.
+
+### Added — MCP tools
+
+- **`sap.bp.search`** — substring search over `BusinessPartnerFullName`
+  using OData v4 `contains()`.  Returns up to 100 rows.
+- **`sap.bp.get`** — single-entity fetch by Business Partner id.
+- Both tools return a clean "feature disabled" error pointing the
+  operator at `SAP_BUSINESS_HUB_KEY` when the env var is unset.  The
+  tools are always registered so capability discovery is consistent.
+
+### Added — tests
+
+- **`crates/sap-automate-rfc/src/odata.rs`** — 8 unit tests + 1 live
+  integration test (`live_business_partner_search`) that auto-skips
+  when `SAP_BUSINESS_HUB_KEY` is unset.
+- **`apps/sap-automate-server/tests/business_partner.rs`** — 5
+  in-process integration tests covering tool registration, friendly
+  "disabled" fallback, and argument validation.
+
+### Added — docs
+
+- **`docs/INTEGRATION.md`** — three-tier integration strategy: CI
+  (in-process mocks), Demo (Business Hub sandbox — this release),
+  Power-user (ABAP Platform Trial Docker).  Step-by-step on getting
+  a free SAP Community API key, wiring `SAP_BUSINESS_HUB_KEY`,
+  running the live integration test, rate-limit guidance, and the
+  extension pattern for adding `API_MATERIAL` / other services.
+- **README** — new "Live SAP backend" row in the MCP spec coverage
+  matrix; new "SAP Business Hub" tools row; bumped test count
+  159 → 172.
+
+### Changed
+
+- Workspace version: `1.2.0` → `1.3.0` (SemVer minor — additive).
+- MCP tool count: **35 → 37**.
+- Test count: **159 → 172** passing (+8 odata module +5 BP integration).
+
+### Reference designs studied
+
+- [SAP Business Accelerator Hub](https://api.sap.com/) — sandbox host
+  pattern + `APIKey` header convention.
+- [SAP S/4HANA OData v4 APIs catalogue](https://api.sap.com/package/SAPS4HANACloud/odata)
+  — endpoint URL conventions, `srvd_a2x` package naming.
+
+---
+
 ## [1.2.0] — 2026-05-25  ·  MCP spec utilities
 
 Fills in the optional MCP 2025-06-18 utilities required for a

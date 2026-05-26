@@ -170,6 +170,29 @@ async fn main() -> anyhow::Result<()> {
     let adt_destination = AdtDestination::mock(cli.adt_destination.clone().unwrap_or_else(|| "default".into()));
     let adt_client: Arc<dyn AdtClient> = MockAdtClient::new(adt_destination);
 
+    // SAP Business Accelerator Hub sandbox client — Live SAP backend
+    // tier.  Built from SAP_BUSINESS_HUB_KEY env var; absent → tools
+    // are still registered but return a friendly "feature disabled"
+    // error instead of crashing.
+    let business_hub: Option<Arc<sap_automate_rfc::BusinessHubClient>> =
+        match sap_automate_rfc::BusinessHubClient::from_env() {
+            None => {
+                tracing::info!("SAP_BUSINESS_HUB_KEY not set — Business Hub tools disabled");
+                None
+            }
+            Some(Ok(client)) => {
+                tracing::info!(
+                    base_url = %client.config().base_url,
+                    "SAP Business Accelerator Hub sandbox active"
+                );
+                Some(Arc::new(client))
+            }
+            Some(Err(e)) => {
+                tracing::warn!(error = %e, "Business Hub client init failed — tools disabled");
+                None
+            }
+        };
+
     // AGENTS.md guardrails.
     let agents_md = load_agents_md(cli.agents_md.as_deref()).await;
 
@@ -192,6 +215,7 @@ async fn main() -> anyhow::Result<()> {
         sap_client,
         metadata_cache: metadata_cache_handle,
         adt_client,
+        business_hub,
         read_only,
         agents_md: agents_md.clone(),
     });

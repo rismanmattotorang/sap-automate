@@ -12,6 +12,13 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }
+reqwest = { workspace = true, optional = true }
+
+[features]
+default = []
+# Enables the SAP S/4HANA OData v4 client (Business Accelerator Hub sandbox
+# + on-prem OData destinations).  Pulls in reqwest.
+odata = ["reqwest"]
 
 [dev-dependencies]
 tokio = { workspace = true }

@@ -4,11 +4,11 @@
 
 ### The agentic OS for SAP — built in Rust, on-premise by default.
 
-**Sub-millisecond retrieval. 159 SAP-correctness tests. Apache-2.0.**
+**Sub-millisecond retrieval. 172 SAP-correctness tests. Apache-2.0.**
 **Made by [ParagonCorp](#about-paragoncorp).**
 
 [![CI](https://img.shields.io/badge/CI-passing-22c55e?style=flat-square&logo=githubactions)](.github/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-159%20passing-22d3ee?style=flat-square)](#tests)
+[![Tests](https://img.shields.io/badge/tests-172%20passing-22d3ee?style=flat-square)](#tests)
 [![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange?style=flat-square&logo=rust)](https://www.rust-lang.org)
 [![MCP](https://img.shields.io/badge/MCP-2025--06--18-8b5cf6?style=flat-square)](https://modelcontextprotocol.io)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
@@ -137,12 +137,13 @@ Full audit trail: [`docs/SAP_CORRECTNESS.md`](docs/SAP_CORRECTNESS.md).
 
 ## What ships in this repo
 
-**35 production MCP tools** across 5 domains:
+**37 production MCP tools** across 6 domains:
 
 | Domain | Tools |
 |---|---|
 | **RAG search** (6) | `abap.search`, `bpmn.find_process`, `eam.search_apps`, `sap.help.search`, `sap.docs.search`, `sap.kb.navigate` (hierarchical document-tree walker) |
 | **SAP system / RFC / tables** (12) | `sap.system.info`, `sap.system.health`, `sap.system.cache_stats`, `sap.system.cache_invalidate`, `sap.rfc.search`, `sap.rfc.metadata`, `sap.rfc.bulk_metadata`, `sap.rfc.call`, `sap.table.read`, `sap.table.structure`, `sap.bapi.parse_return`, `sap.docs.search` |
+| **SAP Business Hub (Live OData v4)** (2) | `sap.bp.search`, `sap.bp.get` — hit the [SAP Business Accelerator Hub](https://api.sap.com/) sandbox for `API_BUSINESS_PARTNER` v4 with a free SAP Community API key. See [`docs/INTEGRATION.md`](docs/INTEGRATION.md) |
 | **ABAP ADT** (11) | `abap.adt.get_program`, `…get_class`, `…get_interface`, `…get_include`, `…get_function_module`, `…get_package_contents`, `…get_cds_view`, `…search`, `…where_used`, `…get_table_contents`, `…activate` (write, gated) |
 | **Knowledge graph** (4) | `kb.multi_hop` (HippoRAG), `kb.global_query` (GraphRAG), `kb.summarise` (RAPTOR), `kb.graph_neighborhood` |
 | **Workflows** (3, write, gated) | `sap.workflow.create_purchase_order`, `sap.workflow.maintain_customer_master`, `sap.workflow.release_transport` |
@@ -216,6 +217,7 @@ A "best-in-class MCP server" is judged by which spec utilities it actually imple
 | `logging/setLevel` + `notifications/message` | ✅ | atomic per-server level, exposed to clients via `Client::set_log_level` |
 | `completion/complete` | ✅ | pluggable per-prompt completers; SoD audit / ABAP review / BW migration arg autocomplete shipped |
 | HTTP transport: `Origin` validation (DNS rebinding) | ✅ | `--allowed-origin` CLI flag, spec §4.6 |
+| **Live SAP backend** (OData v4 — `API_BUSINESS_PARTNER`) | ✅ | `BusinessHubClient` against `sandbox.api.sap.com`; gated on `SAP_BUSINESS_HUB_KEY`; tools `sap.bp.search` + `sap.bp.get`; see [`docs/INTEGRATION.md`](docs/INTEGRATION.md) |
 | HTTP transport: bearer auth | ✅ | `--bearer-token` |
 | `notifications/initialized` | ✅ | client-side emit |
 | `notifications/progress` (server → client) | 🚧 v1.2 | type model in place; tool-side opt-in landing next |
@@ -225,7 +227,7 @@ A "best-in-class MCP server" is judged by which spec utilities it actually imple
 
 ## Production posture
 
-- ✅ **159 tests passing** across protocol conformance, MCP spec utilities (`logging/setLevel`, `completion/complete`, capability advertisement, HTTP origin validation), SAP correctness, ADT integration, RAG, graph, agentic, observability, KB, and crawler hardening
+- ✅ **172 tests passing** across protocol conformance, MCP spec utilities (`logging/setLevel`, `completion/complete`, capability advertisement, HTTP origin validation), SAP correctness, ADT integration, RAG, graph, agentic, observability, KB, crawler hardening, and live SAP Business Hub sandbox (gated; skips cleanly without `SAP_BUSINESS_HUB_KEY`)
 - ✅ **Read-only by default**, `--enable-writes` to flip
 - ✅ **Structured error taxonomy** mapped to MCP JSON-RPC error codes (transient / permanent / degraded)
 - ✅ **AGENTS.md guardrails** loaded from disk; surfaced in `initialize.instructions` and as MCP resource

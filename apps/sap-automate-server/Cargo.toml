@@ -20,7 +20,7 @@ mcp-transport = { workspace = true, features = ["http"] }
 sap-automate-kb = { workspace = true }
 sap-automate-rag = { workspace = true }
 sap-automate-ingest = { workspace = true }
-sap-automate-rfc = { workspace = true }
+sap-automate-rfc = { workspace = true, features = ["odata"] }
 sap-automate-adt = { workspace = true }
 sap-automate-skills = { workspace = true }
 sap-automate-graph = { workspace = true }

@@ -215,7 +215,108 @@ pub fn sap_tools(ctx: &Arc<ServerContext>) -> Vec<ToolDescriptor> {
         tool_table_structure(ctx),
         tool_docs_search(ctx),
         tool_bapi_parse_return(ctx),
+        tool_bp_search(ctx),
+        tool_bp_get(ctx),
     ]
+}
+
+// --- sap.bp.search / sap.bp.get -------------------------------------------
+// Live SAP backend tier: SAP Business Accelerator Hub sandbox.
+// Convergent with the OData generic-proxy design discipline shipped as
+// `sap.skill.odata_service_design`.
+
+#[derive(Deserialize)]
+struct BpSearchArgs {
+    query: String,
+    #[serde(default = "default_bp_limit")]
+    limit: usize,
+}
+fn default_bp_limit() -> usize { 10 }
+
+fn tool_bp_search(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            let args: BpSearchArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("sap.bp.search: invalid arguments: {e}"))),
+            };
+            let hub = match &ctx.business_hub {
+                Some(h) => h,
+                None => return Ok(CallToolResult::error(
+                    "sap.bp.search: SAP Business Accelerator Hub disabled. \
+                     Set SAP_BUSINESS_HUB_KEY (free key from a SAP Community account) and restart the server.".to_string()
+                )),
+            };
+            match hub.search_business_partners(&args.query, args.limit.clamp(1, 100)).await {
+                Ok(rows) => render_json("sap.bp.search", &serde_json::json!({
+                    "query": args.query,
+                    "count": rows.len(),
+                    "results": rows,
+                })),
+                Err(e) => Ok(CallToolResult::error(format!("sap.bp.search: {e}"))),
+            }
+        }
+    });
+    ToolDescriptor::new(
+        "sap.bp.search",
+        Some("Search SAP A_BusinessPartner (OData v4) on the SAP Business Accelerator Hub sandbox. \
+              Returns matching Business Partner rows with id, full name, category, organization name, \
+              and BP creation date. Requires SAP_BUSINESS_HUB_KEY env var (free SAP Community login).".into()),
+        ToolInputSchema::from_value(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Substring match against BusinessPartnerFullName."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 10}
+            },
+            "required": ["query"],
+            "additionalProperties": false
+        })),
+        Arc::new(handler),
+    )
+}
+
+#[derive(Deserialize)]
+struct BpGetArgs {
+    id: String,
+}
+
+fn tool_bp_get(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
+    let handler = ToolFn(move |arguments: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
+        async move {
+            let args: BpGetArgs = match serde_json::from_value(arguments) {
+                Ok(a) => a,
+                Err(e) => return Ok(CallToolResult::error(format!("sap.bp.get: invalid arguments: {e}"))),
+            };
+            let hub = match &ctx.business_hub {
+                Some(h) => h,
+                None => return Ok(CallToolResult::error(
+                    "sap.bp.get: SAP Business Accelerator Hub disabled. Set SAP_BUSINESS_HUB_KEY.".to_string()
+                )),
+            };
+            match hub.get_business_partner(&args.id).await {
+                Ok(bp) => render_json("sap.bp.get", &bp),
+                Err(e) => Ok(CallToolResult::error(format!("sap.bp.get: {e}"))),
+            }
+        }
+    });
+    ToolDescriptor::new(
+        "sap.bp.get",
+        Some("Fetch a single SAP A_BusinessPartner by id from the SAP Business Accelerator Hub sandbox (OData v4). \
+              Requires SAP_BUSINESS_HUB_KEY.".into()),
+        ToolInputSchema::from_value(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "id": {"type": "string", "description": "Business Partner identifier (e.g. '1003764')."}
+            },
+            "required": ["id"],
+            "additionalProperties": false
+        })),
+        Arc::new(handler),
+    )
 }
 
 // --- sap.system.cache_stats ------------------------------------------------
