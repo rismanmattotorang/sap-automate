@@ -38,6 +38,13 @@ pub struct HttpServerConfig {
     /// scrapers don't need to know the bearer token; production
     /// deployments restrict the endpoint via NetworkPolicy.
     pub metrics_renderer: Option<MetricsRenderFn>,
+    /// Allowed `Origin` header values.  When non-empty, requests whose
+    /// `Origin` header is absent OR not in this list are rejected with
+    /// HTTP 403 — the spec-recommended DNS-rebinding mitigation for
+    /// browser-accessible MCP servers (MCP 2025-06-18 §4.6 transport
+    /// security).  Empty list disables the check (default; for stdio
+    /// or trusted network deployments).
+    pub allowed_origins: Vec<String>,
 }
 
 impl Default for HttpServerConfig {
@@ -46,6 +53,7 @@ impl Default for HttpServerConfig {
             bind: "127.0.0.1:3030".parse().unwrap(),
             bearer_token: None,
             metrics_renderer: None,
+            allowed_origins: Vec::new(),
         }
     }
 }
@@ -82,6 +90,7 @@ impl HttpServerTransport {
     {
         let state = Arc::new(AppState {
             bearer_token: config.bearer_token.clone(),
+            allowed_origins: config.allowed_origins.clone(),
             dispatch: Arc::new(dispatch),
             events: Mutex::new(EventBus::default()),
         });
@@ -133,6 +142,7 @@ where
     Fut: std::future::Future<Output = Option<Message>> + Send + 'static,
 {
     bearer_token: Option<String>,
+    allowed_origins: Vec<String>,
     dispatch: Arc<F>,
     events: Mutex<EventBus>,
 }
@@ -151,6 +161,9 @@ where
     F: Fn(Message) -> Fut + Send + Sync + 'static,
     Fut: std::future::Future<Output = Option<Message>> + Send + 'static,
 {
+    if !check_origin(&state.allowed_origins, &headers) {
+        return (axum::http::StatusCode::FORBIDDEN, "origin not allowed").into_response();
+    }
     if !check_auth(&state.bearer_token, &headers) {
         return (axum::http::StatusCode::UNAUTHORIZED, "unauthorized").into_response();
     }
@@ -176,6 +189,9 @@ where
     F: Fn(Message) -> Fut + Send + Sync + 'static,
     Fut: std::future::Future<Output = Option<Message>> + Send + 'static,
 {
+    if !check_origin(&state.allowed_origins, &headers) {
+        return (axum::http::StatusCode::FORBIDDEN, "origin not allowed").into_response();
+    }
     if !check_auth(&state.bearer_token, &headers) {
         return (axum::http::StatusCode::UNAUTHORIZED, "unauthorized").into_response();
     }
@@ -220,5 +236,86 @@ fn check_auth(expected: &Option<String>, headers: &axum::http::HeaderMap) -> boo
             .and_then(|h| h.to_str().ok())
             .map(|s| s == format!("Bearer {token}"))
             .unwrap_or(false),
+    }
+}
+
+/// DNS-rebinding mitigation.  When `allowed` is non-empty, the request
+/// MUST carry an `Origin` header whose value is one of the allowed
+/// entries.  Empty allowlist disables the check (suitable for stdio,
+/// trusted in-cluster traffic, or unit tests).
+///
+/// Spec reference: MCP 2025-06-18 §4.6 — "Transport security: HTTP
+/// servers SHOULD validate the Origin header to prevent DNS rebinding."
+fn check_origin(allowed: &[String], headers: &axum::http::HeaderMap) -> bool {
+    if allowed.is_empty() {
+        return true;
+    }
+    let origin = headers
+        .get(axum::http::header::ORIGIN)
+        .and_then(|h| h.to_str().ok());
+    match origin {
+        None => false,
+        Some(o) => allowed.iter().any(|a| a == o),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::{HeaderMap, HeaderValue};
+
+    fn h(key: &'static str, value: &str) -> HeaderMap {
+        let mut m = HeaderMap::new();
+        m.insert(key, HeaderValue::from_str(value).unwrap());
+        m
+    }
+
+    #[test]
+    fn empty_allowlist_accepts_everything() {
+        assert!(check_origin(&[], &HeaderMap::new()));
+        assert!(check_origin(&[], &h("origin", "http://evil.com")));
+    }
+
+    #[test]
+    fn populated_allowlist_rejects_missing_origin() {
+        let allowed = vec!["http://localhost:3000".into()];
+        assert!(!check_origin(&allowed, &HeaderMap::new()),
+            "no Origin header must be rejected when an allowlist is configured");
+    }
+
+    #[test]
+    fn populated_allowlist_accepts_matching_origin() {
+        let allowed = vec!["http://localhost:3000".into()];
+        assert!(check_origin(&allowed, &h("origin", "http://localhost:3000")));
+    }
+
+    #[test]
+    fn populated_allowlist_rejects_non_matching_origin() {
+        let allowed = vec!["http://localhost:3000".into()];
+        assert!(!check_origin(&allowed, &h("origin", "http://evil.com")));
+    }
+
+    #[test]
+    fn allowlist_is_case_sensitive_exact_match() {
+        // Per RFC 6454 origins are case-sensitive after the scheme.  We
+        // do exact-string match — operators get the behaviour they
+        // configured, not silent case folding.
+        let allowed = vec!["http://Localhost:3000".into()];
+        assert!(!check_origin(&allowed, &h("origin", "http://localhost:3000")));
+    }
+
+    #[test]
+    fn check_auth_passes_when_no_token_required() {
+        assert!(check_auth(&None, &HeaderMap::new()));
+    }
+
+    #[test]
+    fn check_auth_rejects_missing_bearer() {
+        assert!(!check_auth(&Some("secret".into()), &HeaderMap::new()));
+    }
+
+    #[test]
+    fn check_auth_accepts_matching_bearer() {
+        assert!(check_auth(&Some("secret".into()), &h("authorization", "Bearer secret")));
     }
 }

@@ -4,11 +4,11 @@
 
 ### The agentic OS for SAP — built in Rust, on-premise by default.
 
-**Sub-millisecond retrieval. 145 SAP-correctness tests. Apache-2.0.**
+**Sub-millisecond retrieval. 159 SAP-correctness tests. Apache-2.0.**
 **Made by [ParagonCorp](#about-paragoncorp).**
 
 [![CI](https://img.shields.io/badge/CI-passing-22c55e?style=flat-square&logo=githubactions)](.github/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-145%20passing-22d3ee?style=flat-square)](#tests)
+[![Tests](https://img.shields.io/badge/tests-159%20passing-22d3ee?style=flat-square)](#tests)
 [![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange?style=flat-square&logo=rust)](https://www.rust-lang.org)
 [![MCP](https://img.shields.io/badge/MCP-2025--06--18-8b5cf6?style=flat-square)](https://modelcontextprotocol.io)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
@@ -201,9 +201,31 @@ Every layer is a trait-based seam: `KnowledgeStore`, `EmbeddingClient`, `SapClie
 
 ---
 
+## MCP 2025-06-18 spec coverage
+
+A "best-in-class MCP server" is judged by which spec utilities it actually implements, not just `tools/list` and `tools/call`. SAP-Automate v1.2 covers:
+
+| Spec method / notification | Status | Where |
+|---|---|---|
+| `initialize` + capability negotiation | ✅ | `mcp-server` |
+| `ping` | ✅ | `mcp-server` |
+| `tools/list`, `tools/call` | ✅ | `mcp-server` (35 tools) |
+| `resources/list`, `resources/read` | ✅ | `mcp-server` (12 resources) |
+| `prompts/list`, `prompts/get` | ✅ | `mcp-server` (16 prompts) |
+| `elicitation/create` (server → client request) | ✅ | `ElicitationHandle` + `tokio::task_local!` `TOOL_CONTEXT` |
+| `logging/setLevel` + `notifications/message` | ✅ | atomic per-server level, exposed to clients via `Client::set_log_level` |
+| `completion/complete` | ✅ | pluggable per-prompt completers; SoD audit / ABAP review / BW migration arg autocomplete shipped |
+| HTTP transport: `Origin` validation (DNS rebinding) | ✅ | `--allowed-origin` CLI flag, spec §4.6 |
+| HTTP transport: bearer auth | ✅ | `--bearer-token` |
+| `notifications/initialized` | ✅ | client-side emit |
+| `notifications/progress` (server → client) | 🚧 v1.2 | type model in place; tool-side opt-in landing next |
+| `notifications/cancelled` | 🚧 v1.2 | cooperative cancellation requires per-tool refactor |
+| `resources/subscribe` + `notifications/resources/updated` | ⏸ | web UI polls; not required for current operator surface |
+| `roots/list` | ⏸ | filesystem-bounded client concept; no consumer in our tool surface |
+
 ## Production posture
 
-- ✅ **145 tests passing** across protocol conformance, SAP correctness, ADT integration, RAG, graph, agentic, observability, KB, and crawler hardening
+- ✅ **159 tests passing** across protocol conformance, MCP spec utilities (`logging/setLevel`, `completion/complete`, capability advertisement, HTTP origin validation), SAP correctness, ADT integration, RAG, graph, agentic, observability, KB, and crawler hardening
 - ✅ **Read-only by default**, `--enable-writes` to flip
 - ✅ **Structured error taxonomy** mapped to MCP JSON-RPC error codes (transient / permanent / degraded)
 - ✅ **AGENTS.md guardrails** loaded from disk; surfaced in `initialize.instructions` and as MCP resource

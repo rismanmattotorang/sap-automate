@@ -86,6 +86,14 @@ struct Cli {
     #[arg(long)]
     bearer_token: Option<String>,
 
+    /// Allowed `Origin` header values for HTTP transport (MCP 2025-06-18
+    /// §4.6 — DNS-rebinding mitigation).  Repeatable.  Example:
+    /// `--allowed-origin http://localhost:3000`.  When empty, the origin
+    /// check is disabled — only safe for stdio or trusted in-cluster
+    /// traffic.
+    #[arg(long = "allowed-origin", num_args = 1)]
+    allowed_origins: Vec<String>,
+
     /// TTL in seconds for the RFC metadata cache (thupalo/sap-rfc-mcp-server
     /// pattern).  `0` disables caching — every `sap.rfc.metadata` and
     /// `sap.rfc.bulk_metadata` call falls through to the backend.
@@ -243,6 +251,7 @@ async fn main() -> anyhow::Result<()> {
                     bind,
                     bearer_token: cli.bearer_token.clone(),
                     metrics_renderer: Some(render),
+                    allowed_origins: cli.allowed_origins.clone(),
                 },
                 move |msg| {
                     let server = dispatch_server.clone();
@@ -294,6 +303,9 @@ fn build_server(ctx: Arc<ServerContext>, agents_md: &Option<String>, read_only: 
 
     // Prompts (built-in + skills loaded from disk).
     for desc in prompts::all(skills) { builder = builder.prompt(desc); }
+
+    // MCP 2025-06-18 completion utility — autocomplete for skill arguments.
+    builder = sap_automate_server_lib::register_completers(builder);
 
     builder.build()
 }

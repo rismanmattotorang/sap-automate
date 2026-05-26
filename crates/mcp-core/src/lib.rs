@@ -15,4 +15,9 @@ pub use protocol::{
     Prompt, PromptArgument, ListPromptsResult, GetPromptParams, GetPromptResult, PromptMessage,
     Role,
     ElicitationParams, ElicitationResult, ElicitationAction,
+    // MCP 2025-06-18 optional utilities.
+    LogLevel, SetLevelParams, LogMessageParams,
+    ProgressToken, ProgressParams,
+    CancelledParams,
+    CompletionRef, CompletionArgumentRef, CompleteParams, CompletionData, CompleteResult,
 };

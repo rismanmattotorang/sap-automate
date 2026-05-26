@@ -6,6 +6,74 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [1.2.0] — 2026-05-25  ·  MCP spec utilities
+
+Fills in the optional MCP 2025-06-18 utilities required for a
+best-in-class protocol implementation — informed by the official
+[`modelcontextprotocol`](https://github.com/modelcontextprotocol) spec
+and the [`nisalgunawardhana/introduction-to-mcp`](https://github.com/nisalgunawardhana/introduction-to-mcp)
+tutorial.  Additive — no breaking changes.
+
+### Added — protocol surface
+
+- **`logging/setLevel`** — clients can crank server log verbosity at
+  runtime (RFC 5424 levels: debug → emergency).  Atomic per-server
+  level; threadsafe; spec-compliant `{}` response.
+- **`notifications/message`** — type model for server-emitted log
+  messages keyed by logger name.
+- **`completion/complete`** — pluggable per-prompt argument completer
+  registry on `ServerBuilder`.  Returns matching candidates,
+  spec-capped at 100 entries, with `total` / `hasMore` metadata.
+  Three SAP-Automate prompts ship with completers:
+  `sap.skill.security_sod_audit` (scope ∈ user/role/system),
+  `sap.skill.abap_code_review` (kind ∈ class/program/interface/function_module),
+  `sap.skill.bw_to_datasphere_migration` (target_release dropdown).
+- **`notifications/progress`** + **`notifications/cancelled`** — type
+  model with `ProgressToken` (string or number) and `ProgressParams`
+  (monotonic-increase invariant documented).  Tool-side emission +
+  cooperative cancellation land in a follow-up; the wire shape is in
+  place so clients can rely on it.
+- **`ServerCapabilities`** now advertises `logging` and `completions`
+  when those utilities are wired — clients negotiate against the real
+  feature set.
+
+### Added — transport security (MCP 2025-06-18 §4.6)
+
+- **HTTP `Origin` validation** — new `allowed_origins` field on
+  `HttpServerConfig`, exposed as `--allowed-origin <url>` (repeatable)
+  on the server binary.  When set, requests whose `Origin` header is
+  absent or not in the allowlist return HTTP 403.  DNS-rebinding
+  mitigation per spec.  Applies to both `POST /mcp` and `GET /mcp/events`
+  (SSE).
+
+### Added — client surface
+
+- **`Client::set_log_level(level)`** — typed helper for `logging/setLevel`.
+- **`Client::complete_prompt_argument(prompt, arg, typed)`** — typed
+  helper for `completion/complete`.
+- **`Client::raw_request<R>(method, params)`** — forwards-compat
+  escape hatch for spec methods not yet wrapped by a typed helper.
+
+### Tests
+
+- **+14** passing — 159 total (was 145).
+- **`spec_utilities.rs`** integration tests: `logging/setLevel`
+  acceptance + enum validation, `completion/complete` returns
+  registered values, filters by prefix, returns `[]` for unknown
+  refs, and `initialize` advertises `logging` + `completions`
+  capabilities.
+- **HTTP transport unit tests** for `check_origin` (5) and
+  `check_auth` (3).
+
+### Reference designs studied
+
+- [`modelcontextprotocol`](https://github.com/modelcontextprotocol) — the
+  official spec org; SDKs across 10+ languages.
+- [`nisalgunawardhana/introduction-to-mcp`](https://github.com/nisalgunawardhana/introduction-to-mcp)
+  — 13-module tutorial covering server / client / best-practices / debugging.
+
+---
+
 ## [1.1.0] — 2026-05-25  ·  Convergence pass
 
 Three Karpathy-style passes layered on top of v1.0 — each additive, none

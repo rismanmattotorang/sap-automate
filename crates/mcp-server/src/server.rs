@@ -4,16 +4,18 @@ use mcp_core::{
     error::ErrorCode,
     jsonrpc::{ErrorObject, Notification, Request, Response},
     protocol::{
-        methods, CallToolParams, CallToolResult, GetPromptParams, GetPromptResult,
-        Implementation, InitializeParams, InitializeResult, ListPromptsResult, ListResourcesResult,
-        ListToolsResult, PromptsCapability, ReadResourceParams, ReadResourceResult,
-        ResourcesCapability, ServerCapabilities, ToolsCapability, PROTOCOL_VERSION,
+        methods, CallToolParams, CallToolResult, CompleteParams, CompleteResult, CompletionData,
+        CompletionRef, GetPromptParams, GetPromptResult, Implementation, InitializeParams,
+        InitializeResult, ListPromptsResult, ListResourcesResult, ListToolsResult, LogLevel,
+        PromptsCapability, ReadResourceParams, ReadResourceResult, ResourcesCapability,
+        ServerCapabilities, SetLevelParams, ToolsCapability, PROTOCOL_VERSION,
     },
     Error, Id, Message, Result, ToolContent,
 };
 use mcp_transport::Transport;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
@@ -30,6 +32,8 @@ pub struct ServerBuilder {
     resources: HashMap<String, ResourceDescriptor>,
     prompts: HashMap<String, PromptDescriptor>,
     exposure: ExposurePolicy,
+    completers: HashMap<(String, String), ArgumentCompleter>,
+    initial_log_level: LogLevel,
 }
 
 impl ServerBuilder {
@@ -41,7 +45,28 @@ impl ServerBuilder {
             resources: HashMap::new(),
             prompts: HashMap::new(),
             exposure: ExposurePolicy::ReadOnlyOnly,
+            completers: HashMap::new(),
+            initial_log_level: LogLevel::Info,
         }
+    }
+
+    /// Register an argument completer for one prompt + argument pair.
+    /// MCP 2025-06-18 completion utility (`completion/complete`).
+    /// The closure receives `(typed_prefix, full_typed_value)` for the
+    /// argument and returns the candidate strings.
+    pub fn completer<F>(mut self, prompt_name: impl Into<String>, argument: impl Into<String>, f: F) -> Self
+    where
+        F: Fn(&str, &str) -> Vec<String> + Send + Sync + 'static,
+    {
+        self.completers
+            .insert((prompt_name.into(), argument.into()), Arc::new(f));
+        self
+    }
+
+    /// Initial log level — overridable at runtime via `logging/setLevel`.
+    pub fn log_level(mut self, level: LogLevel) -> Self {
+        self.initial_log_level = level;
+        self
     }
 
     /// Set the tool exposure policy.  Defaults to `ReadOnlyOnly` so write
@@ -108,10 +133,19 @@ impl ServerBuilder {
                 resources: self.resources,
                 prompts: self.prompts,
                 exposure: policy,
+                completers: self.completers,
+                log_level: AtomicU8::new(self.initial_log_level.rank()),
             }),
         }
     }
 }
+
+/// Pluggable per-prompt argument completer (MCP 2025-06-18 completion utility).
+/// Returns a list of suggestion strings for `(prompt_name, argument_name,
+/// already-typed prefix)`.  Default impl returns `[]` — spec-compliant
+/// "no suggestions" response.  Servers register completers per prompt at
+/// build time via `ServerBuilder::completer(name, fn)`.
+pub type ArgumentCompleter = Arc<dyn Fn(&str, &str) -> Vec<String> + Send + Sync>;
 
 /// Immutable, shared server state.
 pub struct ServerContext {
@@ -121,17 +155,50 @@ pub struct ServerContext {
     pub resources: HashMap<String, ResourceDescriptor>,
     pub prompts: HashMap<String, PromptDescriptor>,
     pub exposure: ExposurePolicy,
+    /// Per-prompt completer table — keyed by `(prompt_name, argument_name)`.
+    pub completers: HashMap<(String, String), ArgumentCompleter>,
+    /// Minimum log level the server will emit via `notifications/message`.
+    /// Encoded as a `u8` (`LogLevel::rank`) so it's atomically updatable
+    /// from any thread via `logging/setLevel`.
+    pub log_level: AtomicU8,
 }
 
 impl ServerContext {
     fn capabilities(&self) -> ServerCapabilities {
+        let logging = if std::env::var_os("SAP_AUTOMATE_DISABLE_LOGGING_CAP").is_some() {
+            None
+        } else {
+            // Empty object signals "logging utility supported".
+            Some(serde_json::Value::Object(Default::default()))
+        };
+        let completions = if self.completers.is_empty() {
+            None
+        } else {
+            Some(serde_json::Value::Object(Default::default()))
+        };
+        let mut extra: serde_json::Map<String, serde_json::Value> = Default::default();
+        if let Some(c) = completions { extra.insert("completions".into(), c); }
         ServerCapabilities {
             tools: (!self.tools.is_empty()).then_some(ToolsCapability { list_changed: false }),
             resources: (!self.resources.is_empty())
                 .then_some(ResourcesCapability { list_changed: false, subscribe: false }),
             prompts: (!self.prompts.is_empty()).then_some(PromptsCapability { list_changed: false }),
-            logging: None,
-            extra: Default::default(),
+            logging,
+            extra,
+        }
+    }
+
+    /// Current minimum log level the operator selected via `logging/setLevel`.
+    pub fn current_log_level(&self) -> LogLevel {
+        match self.log_level.load(Ordering::Relaxed) {
+            0 => LogLevel::Debug,
+            1 => LogLevel::Info,
+            2 => LogLevel::Notice,
+            3 => LogLevel::Warning,
+            4 => LogLevel::Error,
+            5 => LogLevel::Critical,
+            6 => LogLevel::Alert,
+            _ => LogLevel::Emergency,
         }
     }
 }
@@ -373,6 +440,46 @@ impl Server {
                     .ok_or_else(|| Error::protocol(ErrorCode::InvalidParams, format!("unknown prompt '{}'", params.name)))?;
                 let result: GetPromptResult = descriptor.handler.get(params.arguments).await?;
                 Ok(serde_json::to_value(result)?)
+            }
+            methods::LOGGING_SET_LEVEL => {
+                let params: SetLevelParams = parse_params(req.params.clone())?;
+                self.context.log_level.store(params.level.rank(), Ordering::Relaxed);
+                debug!(level = ?params.level, "logging/setLevel applied");
+                Ok(serde_json::json!({}))
+            }
+            methods::COMPLETION_COMPLETE => {
+                let params: CompleteParams = parse_params(req.params.clone())?;
+                let prompt_name = match &params.reference {
+                    CompletionRef::Prompt { name } => name.clone(),
+                    CompletionRef::Resource { uri } => {
+                        // Resource templates aren't surfaced as completers
+                        // here.  Empty list is the spec-compliant fallback.
+                        debug!(uri, "completion for resource template — returning empty list");
+                        return Ok(serde_json::to_value(CompleteResult {
+                            completion: CompletionData::default(),
+                        })?);
+                    }
+                };
+                let typed = params.argument.value.as_str();
+                let completer = self
+                    .context
+                    .completers
+                    .get(&(prompt_name.clone(), params.argument.name.clone()));
+                let values: Vec<String> = match completer {
+                    Some(f) => f(typed, typed),
+                    None => Vec::new(),
+                };
+                // Spec caps the response at 100 entries; honour it.
+                let total = values.len() as u32;
+                let truncated: Vec<String> = values.into_iter().take(100).collect();
+                let has_more = (truncated.len() as u32) < total;
+                Ok(serde_json::to_value(CompleteResult {
+                    completion: CompletionData {
+                        values: truncated,
+                        total: Some(total),
+                        has_more: Some(has_more),
+                    },
+                })?)
             }
             other => Err(Error::protocol(ErrorCode::MethodNotFound, format!("method '{}' not supported", other))),
         }

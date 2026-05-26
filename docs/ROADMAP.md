@@ -1,6 +1,6 @@
 # SAP-Automate Development Roadmap
 
-> **Status: v1.1.0 released — 2026-05-25.**  v1.0 paper phases ✅ complete; v1.1 ships three Karpathy-style convergence passes (skills + apps + KB/RAG/crawler).  See [`CHANGELOG.md`](../CHANGELOG.md) for the release notes.
+> **Status: v1.2.0 released — 2026-05-25.**  v1.0 paper phases ✅ complete; v1.1 shipped three convergence passes (skills + apps + KB/RAG/crawler); v1.2 fills in the optional MCP 2025-06-18 spec utilities (`logging/setLevel`, `completion/complete`, HTTP Origin validation, progress + cancellation wire model).  See [`CHANGELOG.md`](../CHANGELOG.md) for the release notes.
 
 This document translates the SAP-Automate paper (ParagonCorp TPO R&D, 2026)
 into an executable Rust roadmap.

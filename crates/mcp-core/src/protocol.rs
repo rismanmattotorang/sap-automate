@@ -300,8 +300,153 @@ pub struct GetPromptResult {
 }
 
 // ============================================================================
-// Method constants
+// Optional spec utilities (MCP 2025-06-18 §6 — utilities)
 // ============================================================================
+
+// ----------------------------------------------------------------------------
+// Logging (server utilities — logging)
+// ----------------------------------------------------------------------------
+
+/// RFC 5424 severity levels.  The MCP spec uses these names verbatim.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    Debug,
+    Info,
+    Notice,
+    Warning,
+    Error,
+    Critical,
+    Alert,
+    Emergency,
+}
+
+impl LogLevel {
+    /// Numeric rank for threshold comparisons; lower = noisier.
+    pub fn rank(self) -> u8 {
+        match self {
+            LogLevel::Debug => 0,
+            LogLevel::Info => 1,
+            LogLevel::Notice => 2,
+            LogLevel::Warning => 3,
+            LogLevel::Error => 4,
+            LogLevel::Critical => 5,
+            LogLevel::Alert => 6,
+            LogLevel::Emergency => 7,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetLevelParams {
+    pub level: LogLevel,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogMessageParams {
+    pub level: LogLevel,
+    /// Optional name of the emitting logger (e.g. `"sap.table.read"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logger: Option<String>,
+    /// Arbitrary JSON payload — usually a string or a structured object.
+    pub data: Value,
+}
+
+// ----------------------------------------------------------------------------
+// Progress (MCP 2025-06-18 basic utilities — progress)
+// ----------------------------------------------------------------------------
+
+/// Tokens are opaque strings or integers chosen by the originator.  We
+/// model both shapes so the serialiser round-trips client tokens
+/// unmodified.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(untagged)]
+pub enum ProgressToken {
+    String(String),
+    Number(i64),
+}
+
+impl ProgressToken {
+    pub fn from_string(s: impl Into<String>) -> Self { Self::String(s.into()) }
+    pub fn from_number(n: i64) -> Self { Self::Number(n) }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProgressParams {
+    #[serde(rename = "progressToken")]
+    pub progress_token: ProgressToken,
+    /// MUST monotonically increase per spec.  Float to support fractional
+    /// progress (`0.42` = 42 %).
+    pub progress: f64,
+    /// Optional total.  If absent, the receiver renders an indeterminate
+    /// progress bar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<f64>,
+    /// Optional human-readable status message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+// ----------------------------------------------------------------------------
+// Cancellation (MCP 2025-06-18 basic utilities — cancellation)
+// ----------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CancelledParams {
+    /// JSON-RPC id of the request to cancel (always a number in our impl).
+    #[serde(rename = "requestId")]
+    pub request_id: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+// ----------------------------------------------------------------------------
+// Completion (MCP 2025-06-18 client utilities — completion)
+// ----------------------------------------------------------------------------
+
+/// Reference to the entity (prompt or resource template) whose argument
+/// we want to autocomplete.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type")]
+pub enum CompletionRef {
+    #[serde(rename = "ref/prompt")]
+    Prompt { name: String },
+    #[serde(rename = "ref/resource")]
+    Resource { uri: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletionArgumentRef {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompleteParams {
+    #[serde(rename = "ref")]
+    pub reference: CompletionRef,
+    pub argument: CompletionArgumentRef,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CompletionData {
+    pub values: Vec<String>,
+    /// Server-claimed total when the result list was truncated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u32>,
+    /// True when more values exist beyond `values`.
+    #[serde(default, rename = "hasMore", skip_serializing_if = "Option::is_none")]
+    pub has_more: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompleteResult {
+    pub completion: CompletionData,
+}
+
+// ----------------------------------------------------------------------------
+// Method constants
+// ----------------------------------------------------------------------------
 
 pub mod methods {
     pub const INITIALIZE: &str = "initialize";
@@ -320,6 +465,18 @@ pub mod methods {
     /// Server-initiated request: pause a tool mid-execution and ask the
     /// user for structured form input (MCP 2025-06-18 elicitation).
     pub const ELICITATION_CREATE: &str = "elicitation/create";
+
+    /// Client-initiated: set the minimum log severity the server should
+    /// emit via `notifications/message` (MCP 2025-06-18 logging utility).
+    pub const LOGGING_SET_LEVEL: &str = "logging/setLevel";
+
+    /// Client-initiated: argument autocomplete for prompt / resource
+    /// references (MCP 2025-06-18 completion utility).
+    pub const COMPLETION_COMPLETE: &str = "completion/complete";
+
+    pub const NOTIFICATIONS_MESSAGE: &str = "notifications/message";
+    pub const NOTIFICATIONS_PROGRESS: &str = "notifications/progress";
+    pub const NOTIFICATIONS_CANCELLED: &str = "notifications/cancelled";
 
     pub const SHUTDOWN: &str = "shutdown";
 }

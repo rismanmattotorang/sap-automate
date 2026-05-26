@@ -99,6 +99,42 @@ pub async fn build_test_server(
     for desc in resources::all(&ctx) { builder = builder.resource(desc); }
     let skills = SkillRegistry::new();
     for desc in prompts::all(&skills) { builder = builder.prompt(desc); }
+    builder = register_completers(builder);
 
     (builder.build(), ctx)
+}
+
+/// Register `completion/complete` providers for the prompt arguments
+/// that benefit most from autocomplete in MCP clients (Inspector, Claude
+/// Desktop, our own web UI Skill Lab).
+///
+/// MCP 2025-06-18 client utility: each completer takes the typed prefix
+/// and returns matching candidates.  Returning `[]` is spec-compliant.
+pub fn register_completers(builder: mcp_server::ServerBuilder) -> mcp_server::ServerBuilder {
+    let starts_with = |options: &[&'static str], prefix: &str| -> Vec<String> {
+        let p = prefix.to_ascii_lowercase();
+        options.iter()
+            .filter(|o| o.to_ascii_lowercase().starts_with(&p))
+            .map(|o| (*o).to_string())
+            .collect()
+    };
+    builder
+        // SoD audit: scope enum.
+        .completer("sap.skill.security_sod_audit", "scope", move |prefix, _| {
+            starts_with(&["user", "role", "system"], prefix)
+        })
+        // ABAP code review: kind enum.
+        .completer("sap.skill.abap_code_review", "kind", move |prefix, _| {
+            starts_with(&["class", "program", "interface", "function_module"], prefix)
+        })
+        // BW migration: target release dropdown.
+        .completer("sap.skill.bw_to_datasphere_migration", "target_release", move |prefix, _| {
+            starts_with(&[
+                "SAP Datasphere 2026-Q1",
+                "SAP Datasphere 2026-Q2",
+                "SAP Datasphere 2026-Q3",
+                "BW Bridge",
+                "Cloud Embedded Analytics",
+            ], prefix)
+        })
 }

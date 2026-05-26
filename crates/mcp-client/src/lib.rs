@@ -300,6 +300,40 @@ impl Client {
         self.call(methods::PROMPTS_GET, Some(serde_json::to_value(params)?)).await
     }
 
+    /// Set the minimum log severity the server will emit via
+    /// `notifications/message`.  MCP 2025-06-18 logging utility.
+    pub async fn set_log_level(&self, level: mcp_core::LogLevel) -> Result<()> {
+        let params = mcp_core::SetLevelParams { level };
+        let _: Value = self.call(methods::LOGGING_SET_LEVEL, Some(serde_json::to_value(params)?)).await?;
+        Ok(())
+    }
+
+    /// Autocomplete a prompt argument value.  MCP 2025-06-18 completion
+    /// utility.  Returns `(values, has_more)` — empty list is a
+    /// spec-compliant "no suggestions" response.
+    pub async fn complete_prompt_argument(
+        &self,
+        prompt_name: &str,
+        argument_name: &str,
+        typed_value: &str,
+    ) -> Result<mcp_core::CompleteResult> {
+        let params = mcp_core::CompleteParams {
+            reference: mcp_core::CompletionRef::Prompt { name: prompt_name.into() },
+            argument: mcp_core::CompletionArgumentRef {
+                name: argument_name.into(),
+                value: typed_value.into(),
+            },
+        };
+        self.call(methods::COMPLETION_COMPLETE, Some(serde_json::to_value(params)?)).await
+    }
+
+    /// Issue an arbitrary JSON-RPC call.  Useful for raw spec exercises
+    /// in tests and for forwards-compat methods not yet wrapped by a
+    /// typed helper.
+    pub async fn raw_request<R: DeserializeOwned>(&self, method: &str, params: Option<Value>) -> Result<R> {
+        self.call(method, params).await
+    }
+
     pub async fn ping(&self) -> Result<()> {
         let _: Value = self.call(methods::PING, None).await?;
         Ok(())
