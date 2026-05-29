@@ -21,7 +21,12 @@ sap-automate-kb = { workspace = true }
 sap-automate-rag = { workspace = true }
 sap-automate-ingest = { workspace = true }
 sap-automate-rfc = { workspace = true, features = ["odata"] }
-sap-automate-adt = { workspace = true }
+# `http` enables the live HttpAdtClient + destination TOML loader.  The
+# binary already links reqwest (via rfc/odata + mcp-transport/http), so this
+# adds no meaningful dependency surface and keeps the live-wiring code under
+# CI/clippy coverage.  Runtime still defaults to the offline mock unless
+# --destination selects a real SAP system.
+sap-automate-adt = { workspace = true, features = ["http"] }
 sap-automate-skills = { workspace = true }
 sap-automate-graph = { workspace = true }
 sap-automate-observability = { workspace = true }

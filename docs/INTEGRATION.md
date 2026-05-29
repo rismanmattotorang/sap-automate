@@ -168,10 +168,33 @@ For full RFC + ADT against a real ABAP system on your own hardware:
 2. Allocate **32 GB RAM** to the container.  SAP officially recommends
    this; less may run but degrades severely.
 3. Initial start-up takes 10–20 minutes on first run.
-4. Point `HttpAdtClient` at `https://localhost:50000/sap/bc/adt/...`
-   with basic auth (`DEVELOPER` / the password printed at container
-   start).  The 17 ADT integration tests then exercise a real ABAP
-   stack instead of the axum mock.
+4. Point `HttpAdtClient` at the system by creating a **destination file**
+   and selecting it with `--destination` (or `SAP_AUTOMATE_DESTINATION`):
+
+   ```bash
+   mkdir -p ./.sap-automate/destinations
+   cp deploy/sap-automate-destination.example.toml \
+      ./.sap-automate/destinations/dev-s4.toml
+   # edit base_url / client / [auth] (e.g. DEVELOPER + container password)
+
+   SAP_AUTOMATE_DESTINATION=dev-s4 ./target/release/sap-automate-server
+   # logs: "ADT client: live HttpAdtClient against real SAP system"
+   ```
+
+   Search order: `$SAP_AUTOMATE_DESTINATION_DIR`,
+   `./.sap-automate/destinations/`, `~/.config/sap-automate/destinations/`.
+   The destination file holds credentials — `.sap-automate/destinations/`
+   is gitignored and the server never logs the password/token.
+
+   Smoke-test the live path (auto-skips without a destination):
+
+   ```bash
+   SAP_AUTOMATE_DESTINATION=dev-s4 \
+     cargo test -p sap-automate-server --test live_adt -- --nocapture
+   ```
+
+   The 17 ADT integration tests still exercise the axum mock; the
+   `live_adt` test exercises the real ABAP stack.
 5. RFC integration requires the SAP NetWeaver RFC SDK (free download,
    not redistributable — sign-in required at the SAP Software Centre).
 

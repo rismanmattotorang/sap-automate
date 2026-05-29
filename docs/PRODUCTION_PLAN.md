@@ -116,7 +116,15 @@ Sprints are ~1 week. Each has a single demoable acceptance gate. The ordering
 front-loads the lowest-effort real connectivity (ADT) so there is a live
 dev-tenant result by end of Sprint 1.
 
-### Sprint 0 — Foundations & dev-tenant access (prep)
+### Sprint 0 — Foundations & dev-tenant access (prep) — ✅ DONE
+**Shipped:** destination TOML loader (`AdtDestination::load` / `load_from_path`
+/ `config_search_paths`, behind the `http` feature), `--destination` CLI flag
++ `SAP_AUTOMATE_DESTINATION` env, secret-free `AdtAuth::label()`, credential
+files gitignored, `deploy/sap-automate-destination.example.toml` template, and
+4 offline loader unit tests (incl. a password-non-leak assertion). The one
+outstanding Sprint-0 item — obtaining real dev-tenant connection details from
+Basis — is an organisational dependency, not code.
+
 **Goal:** anyone can configure a real destination and run the suite.
 - Obtain dev S/4HANA connection details (host, client, technical user, auth
   method) from Basis. Confirm network reachability from the runtime.
@@ -128,7 +136,17 @@ dev-tenant result by end of Sprint 1.
 - **Skills:** `init`, `session-start-hook`, `update-config`.
 - **Gate:** `--destination` flag parses and loads a TOML; offline tests stay green.
 
-### Sprint 1 — Live ADT read against the dev tenant ⭐ first real result
+### Sprint 1 — Live ADT read against the dev tenant ⭐ first real result — ✅ DONE (code), pending dev-tenant run
+**Shipped:** `HttpAdtClient` is now wired into the server (`build_adt_client`
+in `main.rs`) — a non-mock destination builds the live client instead of the
+mock; the "Phase 7" stub path is gone. `manual_div_ceil` clippy fix in the
+ADT base64 helper. Secret-gated `tests/live_adt.rs` (skips without
+`SAP_AUTOMATE_DESTINATION`, so CI stays green). Verified end-to-end against the
+binary: missing destination errors cleanly, a basic-auth destination logs the
+live HttpAdtClient path and serves `/health`, an `auth=mock` destination falls
+back safely. **Remaining:** point it at the real dev tenant and confirm
+`get_class` returns live source (needs the Sprint-0 Basis credentials).
+
 **Goal:** `abap.adt.get_class` returns real source from dev S/4HANA.
 - Spike (`deep-research`): confirm dev-tenant ADT base path, CSRF fetch, and
   Basic-auth handshake.

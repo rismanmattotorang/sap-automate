@@ -10,3 +10,6 @@ node_modules/
 dist/
 .turbo/
 .eslintcache
+# Live SAP destination files hold credentials — never commit them.
+.sap-automate/destinations/
+*.destination.toml

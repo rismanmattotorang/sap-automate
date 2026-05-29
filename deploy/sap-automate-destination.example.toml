@@ -1,0 +1,49 @@
+# SAP-Automate — live ADT destination template.
+#
+# Copy this file to a destination on the search path and select it with
+# `--destination <name>` or `SAP_AUTOMATE_DESTINATION=<name>`.  Search order
+# (highest priority first):
+#
+#   1. $SAP_AUTOMATE_DESTINATION_DIR/<name>.toml
+#   2. ./.sap-automate/destinations/<name>.toml        (project-local)
+#   3. ~/.config/sap-automate/destinations/<name>.toml (per-user)
+#
+# Example for a destination named "dev-s4":
+#   mkdir -p ./.sap-automate/destinations
+#   cp deploy/sap-automate-destination.example.toml \
+#      ./.sap-automate/destinations/dev-s4.toml
+#   # edit the file, then:
+#   SAP_AUTOMATE_DESTINATION=dev-s4 ./target/release/sap-automate-server
+#
+# SECURITY: this file holds credentials.  Keep it out of version control
+# (./.sap-automate/ is gitignored) and prefer a secrets manager in prod.
+# The server never logs the password/token — only the `auth_type` label.
+
+# `name` is optional — the lookup key (the filename you select) always wins.
+base_url = "https://s4dev.example.com:44300"
+client   = "100"
+language  = "EN"
+
+# --- Auth: pick exactly one [auth] block. ---
+
+# HTTP Basic — most common for an on-prem dev tenant with a technical user.
+[auth]
+type     = "basic"
+user     = "TECHUSER"
+password = "change-me"
+
+# Bearer token (JWT / XSUAA access token):
+# [auth]
+# type  = "bearer"
+# token = "eyJhbGc..."
+
+# SAP BTP service key (XSUAA) — wiring lands in Sprint 4:
+# [auth]
+# type = "service_key"
+# path = "/etc/sap-automate/xsuaa-service-key.json"
+
+# Mutual TLS (on-prem) — wiring lands in Sprint 4:
+# [auth]
+# type      = "certificate"
+# cert_path = "/etc/sap-automate/client.pem"
+# key_path  = "/etc/sap-automate/client.key"

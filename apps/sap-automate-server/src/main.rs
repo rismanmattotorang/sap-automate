@@ -23,7 +23,7 @@ use clap::Parser;
 use mcp_server::Server;
 use mcp_transport::{HttpServerConfig, HttpServerTransport, StdioTransport};
 use sap_automate_observability::metrics::{MetricKind, MetricsRegistry};
-use sap_automate_adt::{AdtClient, AdtDestination, MockAdtClient};
+use sap_automate_adt::{AdtAuth, AdtClient, AdtDestination, HttpAdtClient, MockAdtClient};
 use sap_automate_graph::InMemoryGraph;
 use sap_automate_rag::GraphEngine;
 use sap_automate_skills::SkillRegistry;
@@ -67,10 +67,20 @@ struct Cli {
     #[arg(long, default_value_t = 256)]
     embedding_dim: usize,
 
-    /// ADT destination name (fr0ster/mcp-abap-adt pattern). Defaults to
-    /// "default" → MockAdtClient. Real wiring (HttpAdtClient) is Phase 7.
+    /// ADT destination *label* for the offline MockAdtClient (cosmetic;
+    /// shows up in the `adt-destination://info` resource).  Ignored when
+    /// `--destination` selects a live SAP system.
     #[arg(long)]
     adt_destination: Option<String>,
+
+    /// Name of a **live** SAP destination, loaded from a TOML file (see
+    /// `docs/INTEGRATION.md`).  Search order: `$SAP_AUTOMATE_DESTINATION_DIR`,
+    /// `./.sap-automate/destinations/`, `~/.config/sap-automate/destinations/`.
+    /// When set and the destination's auth is not `mock`, the server talks
+    /// to a real SAP system via `HttpAdtClient` instead of the offline mock.
+    /// Also settable via the `SAP_AUTOMATE_DESTINATION` env var.
+    #[arg(long)]
+    destination: Option<String>,
 
     /// Transport: "stdio" (default) or "http".  HTTP mode binds to
     /// --bind and accepts JSON-RPC POSTs at /mcp plus SSE at /mcp/events
@@ -166,9 +176,10 @@ async fn main() -> anyhow::Result<()> {
         "RFC metadata cache active (thupalo pattern)"
     );
 
-    // ADT client — defaults to MockAdtClient so the binary runs offline.
-    let adt_destination = AdtDestination::mock(cli.adt_destination.clone().unwrap_or_else(|| "default".into()));
-    let adt_client: Arc<dyn AdtClient> = MockAdtClient::new(adt_destination);
+    // ADT client — offline MockAdtClient by default; a live HttpAdtClient
+    // when --destination / SAP_AUTOMATE_DESTINATION selects a real SAP
+    // system whose auth is not `mock` (Sprint 1: live dev-tenant wiring).
+    let adt_client: Arc<dyn AdtClient> = build_adt_client(&cli)?;
 
     // SAP Business Accelerator Hub sandbox client — Live SAP backend
     // tier.  Built from SAP_BUSINESS_HUB_KEY env var; absent → tools
@@ -355,6 +366,48 @@ fn build_instructions(agents_md: &Option<String>, read_only: bool) -> String {
         s.push_str(md);
     }
     s
+}
+
+/// Build the ADT client from CLI/env configuration.
+///
+/// - No `--destination` / `SAP_AUTOMATE_DESTINATION` → offline `MockAdtClient`.
+/// - A destination whose `auth = "mock"` → `MockAdtClient` (lets operators
+///   stage a destination file before credentials exist).
+/// - Any other auth → live `HttpAdtClient` against the real SAP system.
+fn build_adt_client(cli: &Cli) -> anyhow::Result<Arc<dyn AdtClient>> {
+    let dest_name = cli
+        .destination
+        .clone()
+        .or_else(|| std::env::var("SAP_AUTOMATE_DESTINATION").ok())
+        .filter(|s| !s.is_empty());
+
+    let Some(name) = dest_name else {
+        let label = cli.adt_destination.clone().unwrap_or_else(|| "default".into());
+        tracing::info!("ADT client: offline MockAdtClient (no --destination configured)");
+        return Ok(MockAdtClient::new(AdtDestination::mock(label)));
+    };
+
+    let dest = AdtDestination::load(&name)
+        .map_err(|e| anyhow::anyhow!("ADT destination '{name}' could not be loaded: {e}"))?;
+
+    if matches!(dest.auth, AdtAuth::Mock) {
+        tracing::warn!(
+            destination = %name,
+            "destination declares auth=mock — using offline MockAdtClient"
+        );
+        return Ok(MockAdtClient::new(dest));
+    }
+
+    tracing::info!(
+        destination = %name,
+        base_url = %dest.base_url,
+        client = %dest.client,
+        auth = %dest.auth.label(),
+        "ADT client: live HttpAdtClient against real SAP system"
+    );
+    let client = HttpAdtClient::new(dest)
+        .map_err(|e| anyhow::anyhow!("HttpAdtClient init failed: {e}"))?;
+    Ok(Arc::new(client))
 }
 
 fn dirs_config_path(suffix: &str) -> std::path::PathBuf {
