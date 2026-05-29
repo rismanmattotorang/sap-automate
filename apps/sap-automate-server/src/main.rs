@@ -23,6 +23,7 @@ use clap::Parser;
 use mcp_server::Server;
 use mcp_transport::{HttpServerConfig, HttpServerTransport, StdioTransport};
 use sap_automate_observability::metrics::{MetricKind, MetricsRegistry};
+use sap_automate_observability::{AuditEntry, AuditLog, AuditSink};
 use sap_automate_adt::{AdtAuth, AdtClient, AdtDestination, HttpAdtClient, MockAdtClient};
 use sap_automate_graph::InMemoryGraph;
 use sap_automate_rag::GraphEngine;
@@ -111,6 +112,19 @@ struct Cli {
     /// most SAP basis teams maintain.
     #[arg(long, default_value_t = 300)]
     metadata_cache_ttl_secs: u64,
+}
+
+/// Audit sink that emits each entry as a JSON line on the `sap_audit`
+/// `tracing` target (stderr).  Safe for the stdio transport (stdout is the
+/// MCP channel) and picked up by any log aggregator scraping stderr.
+struct TracingAuditSink;
+
+#[async_trait::async_trait]
+impl AuditSink for TracingAuditSink {
+    async fn write(&self, entry: &AuditEntry) {
+        let json = serde_json::to_string(entry).unwrap_or_else(|_| "{}".into());
+        tracing::info!(target: "sap_audit", audit = %json, "state-mutating tool call");
+    }
 }
 
 #[tokio::main]
@@ -249,6 +263,20 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!(skills = loaded, "loaded agentic skills");
     }
 
+    // Audit log for state-mutating tool calls.  Routed through `tracing`
+    // (stderr) so it never corrupts the stdio MCP channel and integrates
+    // with the operator's log pipeline; production can swap the sink for a
+    // tamper-evident store (Loki / S3 object-lock / Splunk HEC).
+    let audit = Arc::new(AuditLog::new(Arc::new(TracingAuditSink)));
+    let sap_system = {
+        let host = std::env::var("SAP_RFC_HTTP_URL")
+            .ok()
+            .or_else(|| std::env::var("SAP_ODATA_BASE_URL").ok())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| creds.ashost.clone());
+        Some(format!("{host}/{}", creds.client))
+    };
+
     let ctx = Arc::new(ServerContext {
         rag,
         graph: graph_engine,
@@ -259,6 +287,8 @@ async fn main() -> anyhow::Result<()> {
         business_hub,
         read_only,
         agents_md: agents_md.clone(),
+        audit,
+        sap_system,
     });
 
     let server = build_server(ctx.clone(), &agents_md, read_only, &skills);

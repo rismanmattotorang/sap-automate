@@ -6,6 +6,85 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [1.4.0] — 2026-05-29  ·  Dev-tenant live wiring, enterprise auth, gated writes, audit
+
+Turns the "live SAP backend" tier from a public-sandbox demo into a
+path that reaches a **real customer S/4HANA development tenant** over
+three pure-HTTP transports — no NetWeaver RFC SDK required.  All
+additive; the offline mock remains the default and CI without SAP
+secrets is unaffected (the live integration tests skip cleanly).
+
+### Added — live transports
+
+- **ADT REST (live).** `HttpAdtClient` is now wired into the server via a
+  destination TOML selected with `--destination` / `SAP_AUTOMATE_DESTINATION`
+  (search path: `$SAP_AUTOMATE_DESTINATION_DIR`, `./.sap-automate/destinations/`,
+  `~/.config/sap-automate/destinations/`).  `AdtDestination::load` +
+  permission warnings on credential files.
+- **OData (tenant).** `BusinessHubClient` generalised beyond the sandbox:
+  new `OdataAuth` (ApiKey / Basic / Bearer / **OAuth2 client-credentials**
+  with token cache), `tenant_business_partner()` + generic `new()`
+  constructors, env-driven `from_env()` (`SAP_ODATA_*`) that prefers a
+  tenant over the sandbox.
+- **SOAP RFC (live).** New `SoapRfcClient` (feature `soap`) over
+  `/sap/bc/soap/rfc`: real `RFC_READ_TABLE` (DELIMITER mode),
+  `RFC_SYSTEM_INFO`, `DDIF_FIELDINFO_GET`, and generic `call_rfc`.
+  Metadata + the read-only safety gate delegate to the curated catalogue
+  (fail-closed for state-modifying / uncatalogued functions).  Configured
+  via `SAP_RFC_*`, decoupled from the native-RFC credential chain.
+
+### Added — enterprise auth
+
+- ADT **ServiceKey (XSUAA)** auth — loads a BTP service key, runs the
+  OAuth2 client-credentials grant, caches the token (refresh 60 s early).
+- ADT **Certificate (mTLS)** auth — `reqwest::Identity` from cert+key PEM.
+- The previous "ServiceKey / Certificate not yet wired (Phase 7)" stub is
+  gone; auth resolution is async with a token cache.
+
+### Added — gated transactional writes
+
+- `sap_automate_rfc::transaction::execute_write_bapi` — calls a write BAPI
+  then `BAPI_TRANSACTION_COMMIT` on success / `BAPI_TRANSACTION_ROLLBACK`
+  on a BAPIRET2 error.  **Fail-closed**: an empty/unparseable BAPIRET2 is
+  treated as *unconfirmed* and never committed; rollback success is verified.
+- `sap.rfc.call` gains a `commit=true` flag routing through that helper
+  (requires `--enable-writes`).
+
+### Added — audit log (full wiring)
+
+- `AuditLog` / `AuditSink` wired into the server.  Every state-mutating
+  call (`sap.rfc.call commit=true` + the three `sap.workflow.*` tools)
+  records a **redacted** `AuditEntry` (event id, timestamp, tool, SAP
+  system, redacted args, outcome, duration).  Default sink emits JSON on
+  the `sap_audit` `tracing` target (stderr — safe for stdio MCP);
+  pluggable for Loki / S3 object-lock / Splunk HEC.
+
+### Added — security hardening (from two review passes)
+
+- Validate RFC function + parameter/field names against a safe ABAP
+  identifier charset (prevents XML injection that could smuggle a second
+  RFC into a SOAP envelope and bypass the read-only gate).
+- Char-boundary-safe response-body truncation (no panic on multibyte).
+- XML parser recursion-depth cap (256).
+- Manual `Debug` for `OdataAuth` / `AdtAuth` so secrets can't leak via `{:?}`.
+- Permission warnings on destination / service-key / mTLS-key files.
+
+### Added — docs & ops
+
+- `docs/RUNBOOK_DEV_TENANT.md` — end-to-end dev-tenant onboarding runbook.
+- `docs/PRODUCTION_PLAN.md` — readiness assessment + sprint plan (status).
+- `deploy/grafana/sap-automate-overview.json` — Grafana dashboard.
+- `deploy/sap-automate-destination.example.toml` — destination template.
+- `docs/INTEGRATION.md` extended for tenant OData + SOAP RFC + the runbook.
+
+### Tests
+
+- **172 → 206** workspace tests.  New: destination loader, OData auth modes,
+  SOAP envelope/codec/parsers/gate, transactional commit/rollback decision,
+  ADT ServiceKey/mTLS, and write-path + audit integration tests.  Live
+  integration tests (`live_adt`, `live_business_partner_search`,
+  `live_read_table_t000`) are secret-gated and skip without a tenant.
+
 ## [1.3.0] — 2026-05-25  ·  Live SAP backend tier (Business Hub sandbox)
 
 Adds the second integration testing tier: live OData v4 against the

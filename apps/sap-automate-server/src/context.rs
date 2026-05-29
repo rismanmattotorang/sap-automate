@@ -2,6 +2,7 @@
 
 use sap_automate_adt::AdtClient;
 use sap_automate_ingest::EmbeddingClient;
+use sap_automate_observability::AuditLog;
 use sap_automate_rag::{GraphEngine, RagEngine};
 use sap_automate_rfc::{BusinessHubClient, MetadataCache, MockSapClient, SapClient};
 use std::sync::Arc;
@@ -25,4 +26,9 @@ pub struct ServerContext {
     pub business_hub: Option<Arc<BusinessHubClient>>,
     pub read_only: bool,
     pub agents_md: Option<String>,
+    /// Append-only audit log for state-mutating tool calls (SOX / GDPR
+    /// evidence).  Arguments are redacted by `AuditLog::record`.
+    pub audit: Arc<AuditLog>,
+    /// SAP system identity (host/client) recorded on each audit entry.
+    pub sap_system: Option<String>,
 }

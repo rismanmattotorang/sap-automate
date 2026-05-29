@@ -145,6 +145,30 @@ Phase 1A trait surfaces (`KnowledgeStore`, `EmbeddingClient`,
 
 > **v1.3.0 is the live-backend release, not the finish line.**  All paper phases (P1–P9), three convergence passes (v1.1), the MCP spec utilities (v1.2), and the SAP Business Hub OData v4 integration (v1.3) are shipped; the codebase has **172 tests passing**, sub-millisecond P95 retrieval, production K8s manifests, a polished agentic surface, hierarchical doc-tree navigation (OpenKB + PageIndex pattern), and a working "Live SAP backend" tier via the SAP Business Accelerator Hub sandbox.  Everything below is what we build *next*, anchored to the four strategic themes that turn this project from "best-in-class open source" into "the category-defining SAP-agent platform".
 
+## v1.4.0 — state of the union (2026-05-29)
+
+v1.4 delivers the **"real-world wiring" theme for SAP** (theme 1 above) — the
+codebase can now be tested against a real development S/4HANA tenant, not just
+the public sandbox.  Full sprint-by-sprint detail + status in
+[`docs/PRODUCTION_PLAN.md`](PRODUCTION_PLAN.md); operator steps in
+[`docs/RUNBOOK_DEV_TENANT.md`](RUNBOOK_DEV_TENANT.md).
+
+| Surface | What shipped | Notes |
+|---|---|---|
+| Live ADT | `HttpAdtClient` wired via destination TOML (`--destination`) | Basic / Bearer / **ServiceKey (XSUAA)** / **mTLS** |
+| Live OData | `BusinessHubClient` generalised to any tenant (`SAP_ODATA_*`) | ApiKey / Basic / Bearer / **OAuth2 client-credentials** |
+| Live RFC | **`SoapRfcClient`** over `/sap/bc/soap/rfc` (`SAP_RFC_*`) | real `RFC_READ_TABLE` etc.; **no NW RFC SDK**; metadata + read-only gate via curated catalogue |
+| Writes | `sap.rfc.call commit=true` → BAPI + `BAPI_TRANSACTION_COMMIT`/`ROLLBACK` | fail-closed (read-only + ambiguous BAPIRET2); `--enable-writes` |
+| Audit | `AuditLog`/`AuditSink` wired through every state-mutating call | redacted entries; pluggable sink |
+| Security | two review passes — XML-injection guard, panic fixes, leak-proof auth `Debug`, file-perm warnings | |
+| Tests | **172 → 206**; live tests secret-gated | |
+
+**Status of the four strategic themes:** theme 1 (real-world wiring) is landed
+for the SAP transports — remaining: real Qdrant/ArangoDB/Postgres backends and
+the live-tenant *run* (needs Basis credentials).  Themes 2–4 (enterprise
+security, agent intelligence, ecosystem reach) advance per the milestones below
+— v1.4 already pulled XSUAA/mTLS and the audit trail forward from theme 2.
+
 ## v1.3.0 — state of the union (released 2026-05-25)
 
 What v1.3 added on top of v1.2:

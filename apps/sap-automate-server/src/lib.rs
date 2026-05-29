@@ -18,6 +18,7 @@ use sap_automate_adt::{AdtClient, AdtDestination, MockAdtClient};
 use sap_automate_graph::InMemoryGraph;
 use sap_automate_ingest::{EmbeddingClient, MockEmbedder};
 use sap_automate_kb::{InMemoryKb, KnowledgeStore};
+use sap_automate_observability::{AuditLog, JsonStderrSink};
 use sap_automate_rag::{GraphEngine, MockReranker, RagEngine};
 use sap_automate_rfc::{MetadataCache, MockSapClient, SapClient};
 use sap_automate_skills::SkillRegistry;
@@ -81,6 +82,8 @@ pub async fn build_test_server(
         business_hub: None,
         read_only: opts.read_only,
         agents_md: opts.agents_md.clone(),
+        audit: Arc::new(AuditLog::new(Arc::new(JsonStderrSink::new()))),
+        sap_system: Some("MOCK/100".into()),
     });
 
     let policy = if opts.read_only {

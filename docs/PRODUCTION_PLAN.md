@@ -221,8 +221,15 @@ line (function + outcome only).
 - Manual `Debug` on `AdtAuth` so passwords/tokens can't leak via `{:?}`.
 Review confirmed the read-only gate is fail-closed at three layers (no
 `commit=true` bypass) and credential error paths leak no secrets.
-**Remaining:** full `AuditSink` wiring (currently a tracing audit line); a real
-PO-create against the dev tenant (needs writes + credentials).
+
+**Audit (now complete):** the full `AuditLog` / `AuditSink` is wired into the
+server. Every state-mutating call — `sap.rfc.call` with `commit=true` and the
+three `sap.workflow.*` tools — records a redacted `AuditEntry` (event id,
+timestamp, tool, SAP system, redacted args, outcome, duration). Default sink
+routes JSON lines through the `sap_audit` `tracing` target (stderr — safe for
+the stdio MCP channel); production can swap in a tamper-evident sink
+(Loki / S3 object-lock / Splunk HEC). 2 integration tests cover the write path.
+**Remaining:** a real PO-create against the dev tenant (needs writes + creds).
 
 **Goal:** safe to run with `--enable-writes` against a *dev* tenant.
 - Implement ServiceKey (XSUAA) + Certificate (mTLS) auth paths now stubbed.

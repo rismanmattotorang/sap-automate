@@ -217,7 +217,7 @@ A "best-in-class MCP server" is judged by which spec utilities it actually imple
 | `logging/setLevel` + `notifications/message` | ✅ | atomic per-server level, exposed to clients via `Client::set_log_level` |
 | `completion/complete` | ✅ | pluggable per-prompt completers; SoD audit / ABAP review / BW migration arg autocomplete shipped |
 | HTTP transport: `Origin` validation (DNS rebinding) | ✅ | `--allowed-origin` CLI flag, spec §4.6 |
-| **Live SAP backend** (OData v4 — `API_BUSINESS_PARTNER`) | ✅ | `BusinessHubClient` against `sandbox.api.sap.com`; gated on `SAP_BUSINESS_HUB_KEY`; tools `sap.bp.search` + `sap.bp.get`; see [`docs/INTEGRATION.md`](docs/INTEGRATION.md) |
+| **Live SAP backends** (ADT REST · OData v4 · SOAP RFC) | ✅ | tenant-ready over three real HTTP transports — ADT (`--destination`, Basic/Bearer/XSUAA/mTLS), OData (`SAP_ODATA_*`, incl. OAuth2), SOAP RFC (`SAP_RFC_*`, real `RFC_READ_TABLE`); gated transactional writes; see [`docs/RUNBOOK_DEV_TENANT.md`](docs/RUNBOOK_DEV_TENANT.md) |
 | HTTP transport: bearer auth | ✅ | `--bearer-token` |
 | `notifications/initialized` | ✅ | client-side emit |
 | `notifications/progress` (server → client) | 🚧 v1.2 | type model in place; tool-side opt-in landing next |
@@ -232,11 +232,14 @@ A "best-in-class MCP server" is judged by which spec utilities it actually imple
 - ✅ **Structured error taxonomy** mapped to MCP JSON-RPC error codes (transient / permanent / degraded)
 - ✅ **AGENTS.md guardrails** loaded from disk; surfaced in `initialize.instructions` and as MCP resource
 - ✅ **Prometheus `/metrics`** endpoint with paper §IV-H named series
-- ✅ **Audit log** with PII / secret redaction
+- ✅ **Audit log** wired through every state-mutating call (`sap.rfc.call` with `commit=true` + the `sap.workflow.*` tools) — redacted args, outcome, SAP system, duration; pluggable `AuditSink` (stderr `tracing` by default; Loki / S3 object-lock / Splunk HEC for SOX/GDPR)
 - ✅ **GitHub Actions CI**: fmt, clippy, test (stable + beta), SAP precision gate, P95 acceptance gate, security audit, Docker build, K8s manifest lint, Next.js web build
 - ✅ **Production K8s manifests**: Deployment (3 replicas, distroless, nonroot, read-only rootfs), Service (ClientIP affinity), HPA (3–12), NetworkPolicy (default-deny), PodDisruptionBudget
-- 🚧 **Live SAP backend wiring** — `HttpAdtClient` complete (17 integration tests); `NetweaverSapClient` against a real sandbox is the next milestone
-- 🚧 **OAuth 2.1 / XSUAA** — service-key model in `AdtAuth`; production flow in v1.2
+- ✅ **Live SAP backends — three real transports, dev-tenant ready** (see [`docs/RUNBOOK_DEV_TENANT.md`](docs/RUNBOOK_DEV_TENANT.md)):
+  - **ADT REST** — `HttpAdtClient` wired into the server via a destination TOML (`--destination`); Basic / Bearer / **ServiceKey (XSUAA)** / **mTLS** auth
+  - **OData v4** — `BusinessHubClient` generalised to any tenant (`SAP_ODATA_*`): ApiKey / Basic / Bearer / **OAuth2 client-credentials**
+  - **SOAP RFC** — `SoapRfcClient` over `/sap/bc/soap/rfc` (`SAP_RFC_*`): real `RFC_READ_TABLE` / `RFC_SYSTEM_INFO` / `DDIF_FIELDINFO_GET` / generic RFC — **no NetWeaver RFC SDK required**
+- ✅ **Gated transactional writes** — `sap.rfc.call commit=true` runs the BAPI then `BAPI_TRANSACTION_COMMIT`/`ROLLBACK`; fail-closed read-only gate (3 layers) + fail-closed on ambiguous BAPIRET2; `--enable-writes` required
 - 🚧 **OpenTelemetry OTLP exporter** — tracing spans already structured; OTLP wiring is a one-file change behind a feature flag
 
 ---
@@ -287,6 +290,8 @@ sap-automate/
 | [`docs/SAP_CORRECTNESS.md`](docs/SAP_CORRECTNESS.md) | Every fixture mapped to its SAP source-of-truth |
 | [`docs/COMPARISON.md`](docs/COMPARISON.md) | Side-by-side analysis vs reference SAP MCP servers |
 | [`docs/INTEGRATION.md`](docs/INTEGRATION.md) | Three-tier SAP integration strategy: CI mocks / SAP Business Hub sandbox / ABAP Platform Trial Docker |
+| [`docs/RUNBOOK_DEV_TENANT.md`](docs/RUNBOOK_DEV_TENANT.md) | End-to-end operator runbook for connecting to a real dev S/4HANA tenant (ADT / OData / SOAP RFC + gated writes) |
+| [`docs/PRODUCTION_PLAN.md`](docs/PRODUCTION_PLAN.md) | Production-readiness assessment + sprint plan (live-backend wiring, status per sprint) |
 | [`deploy/k8s/README.md`](deploy/k8s/README.md) | Production deployment runbook |
 | [`AGENTS.md`](AGENTS.md) | Default agent guardrails (per-deployment overridable) |
 | [`CHANGELOG.md`](CHANGELOG.md) | Release history |

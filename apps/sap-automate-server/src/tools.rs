@@ -17,11 +17,13 @@ use sap_automate_adt::{
 };
 use sap_automate_kb::Domain;
 use sap_automate_rag::Query;
+use sap_automate_observability::{AuditEntry, AuditLog, AuditOutcome};
 use sap_automate_rfc::{
-    execute_write_bapi, ReadTableRequest, RfcCallRequest, MAX_ROWS_HARD_CAP,
+    execute_write_bapi, ReadTableRequest, RfcCallRequest, RfcError, MAX_ROWS_HARD_CAP,
 };
 use serde::Deserialize;
 use std::sync::Arc;
+use std::time::Instant;
 
 // ===========================================================================
 // RAG tools (Phase 1) — search the four SAP knowledge domains
@@ -610,6 +612,7 @@ fn tool_rfc_call(ctx: &Arc<ServerContext>) -> ToolDescriptor {
         async move {
             // `commit` is read off the raw args (RfcCallRequest ignores it).
             let commit = arguments.get("commit").and_then(|v| v.as_bool()).unwrap_or(false);
+            let audit_args = arguments.clone();
             let request: RfcCallRequest = match serde_json::from_value(arguments) {
                 Ok(a) => a,
                 Err(e) => return Ok(CallToolResult::error(format!("sap.rfc.call: invalid arguments: {e}"))),
@@ -617,18 +620,19 @@ fn tool_rfc_call(ctx: &Arc<ServerContext>) -> ToolDescriptor {
             if commit {
                 // Transactional write: call the BAPI, then auto
                 // commit-or-rollback based on its BAPIRET2 (gated by
-                // --enable-writes).
+                // --enable-writes).  Every attempt is audited.
+                let started = Instant::now();
                 return match execute_write_bapi(ctx.sap_client.as_ref(), request, ctx.read_only).await {
                     Ok(outcome) => {
-                        // Audit trail — function + outcome only, never params.
-                        tracing::info!(
-                            target: "sap_audit",
-                            function = %outcome.function,
-                            committed = outcome.committed,
-                            rolled_back = outcome.rolled_back,
-                            messages = outcome.messages.len(),
-                            "transactional write executed"
-                        );
+                        let audit_outcome = if outcome.committed {
+                            AuditOutcome::ok(format!("{} committed", outcome.function))
+                        } else {
+                            AuditOutcome::failed(0, format!(
+                                "{} not committed (rolled_back={})",
+                                outcome.function, outcome.rolled_back
+                            ))
+                        };
+                        record_write_audit(&ctx, "sap.rfc.call", &audit_args, audit_outcome, started).await;
                         render_json("sap.rfc.call", &serde_json::json!({
                             "function": outcome.function,
                             "committed": outcome.committed,
@@ -637,7 +641,14 @@ fn tool_rfc_call(ctx: &Arc<ServerContext>) -> ToolDescriptor {
                             "result": outcome.result,
                         }))
                     }
-                    Err(e) => Ok(CallToolResult::error(format!("sap.rfc.call [{:?}]: {e}", e.code()))),
+                    Err(e) => {
+                        let audit_outcome = match &e {
+                            RfcError::PermissionDenied(r) => AuditOutcome::denied(r.clone()),
+                            other => AuditOutcome::failed(other.code().as_i32(), other.to_string()),
+                        };
+                        record_write_audit(&ctx, "sap.rfc.call", &audit_args, audit_outcome, started).await;
+                        Ok(CallToolResult::error(format!("sap.rfc.call [{:?}]: {e}", e.code())))
+                    }
                 };
             }
             match ctx.sap_client.call_rfc(request, ctx.read_only).await {
@@ -1335,9 +1346,13 @@ pub fn workflow_tools(ctx: &Arc<ServerContext>) -> Vec<ToolDescriptor> {
     ]
 }
 
-fn workflow_create_purchase_order(_ctx: &Arc<ServerContext>) -> ToolDescriptor {
+fn workflow_create_purchase_order(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
     let handler = ToolFn(move |arguments: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
         async move {
+            let started = Instant::now();
+            let audit_args = arguments.clone();
             #[derive(Deserialize)]
             struct PoArgs {
                 #[serde(default)] vendor: Option<String>,
@@ -1371,15 +1386,18 @@ fn workflow_create_purchase_order(_ctx: &Arc<ServerContext>) -> ToolDescriptor {
             match elicit.action {
                 ElicitationAction::Accept => {
                     let content = elicit.content.unwrap_or_else(|| serde_json::json!({}));
+                    record_write_audit(&ctx, "sap.workflow.create_purchase_order", &audit_args, AuditOutcome::ok("purchase order confirmed (mock)"), started).await;
                     Ok(CallToolResult::text(format!(
                         "Purchase order confirmed (mock execution; no real BAPI fired):\n\n{}\n\nNext step (when enable-writes): sap.rfc.call BAPI_PO_CREATE1.",
                         serde_json::to_string_pretty(&content).unwrap_or_default(),
                     )))
                 }
                 ElicitationAction::Decline => {
+                    record_write_audit(&ctx, "sap.workflow.create_purchase_order", &audit_args, AuditOutcome::declined("user declined elicitation"), started).await;
                     Ok(CallToolResult::text("Purchase order cancelled by user (declined elicitation)."))
                 }
                 ElicitationAction::Cancel => {
+                    record_write_audit(&ctx, "sap.workflow.create_purchase_order", &audit_args, AuditOutcome::denied("user aborted or elicitation unavailable"), started).await;
                     Ok(CallToolResult::error("Purchase order cancelled (user aborted or elicitation unavailable). No action taken."))
                 }
             }
@@ -1401,9 +1419,13 @@ fn workflow_create_purchase_order(_ctx: &Arc<ServerContext>) -> ToolDescriptor {
     ).with_writes()
 }
 
-fn workflow_maintain_customer_master(_ctx: &Arc<ServerContext>) -> ToolDescriptor {
+fn workflow_maintain_customer_master(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
     let handler = ToolFn(move |arguments: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
         async move {
+            let started = Instant::now();
+            let audit_args = arguments.clone();
             #[derive(Deserialize)]
             struct CmArgs {
                 #[serde(default)] customer: Option<String>,
@@ -1425,6 +1447,7 @@ fn workflow_maintain_customer_master(_ctx: &Arc<ServerContext>) -> ToolDescripto
 
             use mcp_core::ElicitationAction;
             if pick.action != ElicitationAction::Accept {
+                record_write_audit(&ctx, "sap.workflow.maintain_customer_master", &audit_args, AuditOutcome::declined("cancelled at scope selection"), started).await;
                 return Ok(CallToolResult::error("Customer master maintenance cancelled at scope selection."));
             }
             let picked = pick.content.unwrap_or(serde_json::Value::Null);
@@ -1463,13 +1486,20 @@ fn workflow_maintain_customer_master(_ctx: &Arc<ServerContext>) -> ToolDescripto
             match confirm.action {
                 ElicitationAction::Accept => {
                     let changes = confirm.content.unwrap_or(serde_json::json!({}));
+                    record_write_audit(&ctx, "sap.workflow.maintain_customer_master", &audit_args, AuditOutcome::ok(format!("customer {customer} change confirmed (mock)")), started).await;
                     Ok(CallToolResult::text(format!(
                         "Customer master change confirmed (mock):\n  customer: {customer}\n  scope:    {scope}\n  changes:\n{}\n\nNext step (when enable-writes): sap.rfc.call BAPI_CUSTOMER_CHANGEFROMDATA.",
                         serde_json::to_string_pretty(&changes).unwrap_or_default(),
                     )))
                 }
-                ElicitationAction::Decline => Ok(CallToolResult::text("Customer master change declined; no action taken.")),
-                ElicitationAction::Cancel  => Ok(CallToolResult::error("Customer master cancelled.")),
+                ElicitationAction::Decline => {
+                    record_write_audit(&ctx, "sap.workflow.maintain_customer_master", &audit_args, AuditOutcome::declined("user declined field entry"), started).await;
+                    Ok(CallToolResult::text("Customer master change declined; no action taken."))
+                }
+                ElicitationAction::Cancel  => {
+                    record_write_audit(&ctx, "sap.workflow.maintain_customer_master", &audit_args, AuditOutcome::denied("cancelled"), started).await;
+                    Ok(CallToolResult::error("Customer master cancelled."))
+                }
             }
         }
     });
@@ -1485,9 +1515,13 @@ fn workflow_maintain_customer_master(_ctx: &Arc<ServerContext>) -> ToolDescripto
     ).with_writes()
 }
 
-fn workflow_release_transport(_ctx: &Arc<ServerContext>) -> ToolDescriptor {
+fn workflow_release_transport(ctx: &Arc<ServerContext>) -> ToolDescriptor {
+    let ctx = Arc::clone(ctx);
     let handler = ToolFn(move |arguments: serde_json::Value| {
+        let ctx = Arc::clone(&ctx);
         async move {
+            let started = Instant::now();
+            let audit_args = arguments.clone();
             #[derive(Deserialize)]
             struct TrArgs { transport: Option<String> }
             let args: TrArgs = match serde_json::from_value(arguments) {
@@ -1518,18 +1552,26 @@ fn workflow_release_transport(_ctx: &Arc<ServerContext>) -> ToolDescriptor {
                     let phrase = v.get("confirmation_phrase").and_then(|x| x.as_str()).unwrap_or("");
                     let target = v.get("target_system").and_then(|x| x.as_str()).unwrap_or("QA");
                     if tr != phrase {
+                        record_write_audit(&ctx, "sap.workflow.release_transport", &audit_args, AuditOutcome::denied("confirmation phrase mismatch"), started).await;
                         return Ok(CallToolResult::error(format!(
                             "Confirmation phrase '{phrase}' does not match transport '{tr}'. Release aborted.",
                         )));
                     }
+                    record_write_audit(&ctx, "sap.workflow.release_transport", &audit_args, AuditOutcome::ok(format!("transport {tr} release confirmed → {target} (mock)")), started).await;
                     Ok(CallToolResult::text(format!(
                         "Transport release plan confirmed (mock):\n  transport:           {tr}\n  target_system:       {target}\n  release_dependents:  {}\n  skip_atc:            {}\n\nNext step (when enable-writes): TMS_MGR_FORWARD_TR_REQUEST.",
                         v.get("release_dependents").and_then(|x| x.as_bool()).unwrap_or(false),
                         v.get("skip_atc").and_then(|x| x.as_bool()).unwrap_or(false),
                     )))
                 }
-                ElicitationAction::Decline => Ok(CallToolResult::text("Transport release declined; no action taken.")),
-                ElicitationAction::Cancel  => Ok(CallToolResult::error("Transport release cancelled (client lacks elicitation capability — refusing to proceed without confirmation).")),
+                ElicitationAction::Decline => {
+                    record_write_audit(&ctx, "sap.workflow.release_transport", &audit_args, AuditOutcome::declined("user declined release"), started).await;
+                    Ok(CallToolResult::text("Transport release declined; no action taken."))
+                }
+                ElicitationAction::Cancel  => {
+                    record_write_audit(&ctx, "sap.workflow.release_transport", &audit_args, AuditOutcome::denied("elicitation unavailable"), started).await;
+                    Ok(CallToolResult::error("Transport release cancelled (client lacks elicitation capability — refusing to proceed without confirmation)."))
+                }
             }
         }
     });
@@ -1548,6 +1590,31 @@ fn workflow_release_transport(_ctx: &Arc<ServerContext>) -> ToolDescriptor {
 // ===========================================================================
 // helpers
 // ===========================================================================
+
+/// Record an audit entry for a state-mutating tool call.  `AuditLog::record`
+/// redacts the arguments before they reach the sink.
+async fn record_write_audit(
+    ctx: &ServerContext,
+    tool: &str,
+    arguments: &serde_json::Value,
+    outcome: AuditOutcome,
+    started: Instant,
+) {
+    ctx.audit
+        .record(AuditEntry {
+            event_id: AuditLog::new_event_id(),
+            at_ms: AuditLog::now_ms(),
+            session_id: None,
+            tenant: None,
+            actor: None,
+            tool: tool.to_string(),
+            sap_system: ctx.sap_system.clone(),
+            arguments_redacted: arguments.clone(),
+            outcome,
+            duration_ms: started.elapsed().as_millis() as u64,
+        })
+        .await;
+}
 
 fn render_json<T: serde::Serialize>(tool: &str, value: &T) -> mcp_core::Result<CallToolResult> {
     match serde_json::to_string_pretty(value) {

@@ -138,8 +138,13 @@ Safety properties (verified in Sprint-4 security review):
   is treated as *unconfirmed* and **not** committed (rolled back).
 - **Verified rollback**: `rolled_back` reflects the actual rollback result,
   not an assumption.
-- Each transactional write emits a `sap_audit` log line (function + outcome,
-  never parameters).
+- **Audit log**: every state-mutating call (`sap.rfc.call commit=true` and the
+  `sap.workflow.*` tools) records a redacted `AuditEntry` — event id,
+  timestamp, tool, SAP system, **redacted** arguments (secrets/PII stripped),
+  outcome, duration. By default these are emitted as JSON on the `sap_audit`
+  `tracing` target (stderr); point your log pipeline at it, or wire a
+  tamper-evident `AuditSink` (Loki / S3 object-lock / Splunk HEC) for SOX/GDPR
+  evidence.
 
 ---
 
