@@ -181,25 +181,32 @@ async fn main() -> anyhow::Result<()> {
     // system whose auth is not `mock` (Sprint 1: live dev-tenant wiring).
     let adt_client: Arc<dyn AdtClient> = build_adt_client(&cli)?;
 
-    // SAP Business Accelerator Hub sandbox client — Live SAP backend
-    // tier.  Built from SAP_BUSINESS_HUB_KEY env var; absent → tools
-    // are still registered but return a friendly "feature disabled"
-    // error instead of crashing.
+    // OData v4 client for the sap.bp.* tools — a customer tenant when
+    // SAP_ODATA_BASE_URL is set (Basic / Bearer / OAuth2 per SAP_ODATA_AUTH),
+    // else the public Business Hub sandbox (SAP_BUSINESS_HUB_KEY).  Absent →
+    // tools stay registered but return a friendly "feature disabled" error.
     let business_hub: Option<Arc<sap_automate_rfc::BusinessHubClient>> =
         match sap_automate_rfc::BusinessHubClient::from_env() {
             None => {
-                tracing::info!("SAP_BUSINESS_HUB_KEY not set — Business Hub tools disabled");
+                tracing::info!(
+                    "no OData endpoint configured (set SAP_ODATA_BASE_URL for a tenant \
+                     or SAP_BUSINESS_HUB_KEY for the sandbox) — sap.bp.* tools disabled"
+                );
                 None
             }
             Some(Ok(client)) => {
+                let base = &client.config().base_url;
+                let is_sandbox = base.contains("sandbox.api.sap.com");
                 tracing::info!(
-                    base_url = %client.config().base_url,
-                    "SAP Business Accelerator Hub sandbox active"
+                    base_url = %base,
+                    auth = %client.config().auth.label(),
+                    target = if is_sandbox { "business-hub-sandbox" } else { "tenant" },
+                    "OData v4 backend active (sap.bp.* live)"
                 );
                 Some(Arc::new(client))
             }
             Some(Err(e)) => {
-                tracing::warn!(error = %e, "Business Hub client init failed — tools disabled");
+                tracing::warn!(error = %e, "OData client init failed — sap.bp.* tools disabled");
                 None
             }
         };

@@ -32,7 +32,7 @@ pub use bapiret2::{BapiRet2Message, BapiRet2Severity, parse_bapiret2};
 pub use metadata_cache::{CacheStats, MetadataCache};
 #[cfg(feature = "odata")]
 pub use odata::{
-    BusinessHubClient, BusinessHubConfig, BusinessPartner, OdataError, OdataResult,
+    BusinessHubClient, BusinessHubConfig, BusinessPartner, OdataAuth, OdataError, OdataResult,
 };
 
 pub use client::{

@@ -158,7 +158,18 @@ back safely. **Remaining:** point it at the real dev tenant and confirm
 - **Gate:** with a real destination set, `abap.adt.get_class` + `where_used`
   return live data; without it, suite still green.
 
-### Sprint 2 — Live OData read (generalize BusinessHubClient)
+### Sprint 2 — Live OData read (generalize BusinessHubClient) — ✅ DONE (code), pending dev-tenant run
+**Shipped:** `OdataAuth` enum (ApiKey / Basic / Bearer / OAuth2
+client-credentials) with secret-safe `Debug` + `label()`; `BusinessHubConfig`
+now carries `auth` and gained `tenant_business_partner(host, auth)` + generic
+`new(base_url, auth)` constructors. `BusinessHubClient::from_env()` prefers a
+tenant (`SAP_ODATA_BASE_URL` + `SAP_ODATA_AUTH`/creds) over the sandbox, with
+on-demand OAuth2 token fetch + cache (refresh 60 s early). Sandbox profile
+unchanged (no regression). 5 new offline tests incl. secret-non-leak; the
+gated `live_business_partner_search` now covers tenant or sandbox. Verified
+end-to-end: tenant/sandbox/bad-oauth startup paths log correctly. **Remaining:**
+run against the real tenant once Basis provides OData credentials.
+
 **Goal:** `sap.bp.search` hits the tenant's own `API_BUSINESS_PARTNER`.
 - Refactor `BusinessHubClient` → host-configurable `OdataClient` (base URL,
   auth = Basic | Bearer | OAuth client-credentials; APIKey becomes one mode).

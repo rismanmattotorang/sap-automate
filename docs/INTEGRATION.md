@@ -139,6 +139,43 @@ impl BusinessHubConfig {
 Plus a matching projection struct + tool registration.  Pull requests
 welcome.
 
+### Pointing OData at your own tenant (not the sandbox)
+
+The same `sap.bp.*` tools can hit a **customer S/4HANA tenant** instead of
+the public sandbox.  Set `SAP_ODATA_BASE_URL` (takes precedence over
+`SAP_BUSINESS_HUB_KEY`) plus an auth mode via `SAP_ODATA_AUTH`:
+
+```bash
+# Basic auth (on-prem / tenant technical user) — the default mode.
+export SAP_ODATA_BASE_URL="https://s4hana.example.com:44300"
+export SAP_ODATA_AUTH=basic
+export SAP_ODATA_USER="TECHUSER"
+export SAP_ODATA_PASSWORD="…"
+
+# Bearer (pre-fetched JWT):
+#   SAP_ODATA_AUTH=bearer  SAP_ODATA_TOKEN="eyJ…"
+
+# OAuth2 client-credentials (BTP / XSUAA-fronted):
+#   SAP_ODATA_AUTH=oauth
+#   SAP_ODATA_TOKEN_URL="https://<subaccount>.authentication.<region>.hana.ondemand.com/oauth/token"
+#   SAP_ODATA_CLIENT_ID="…"  SAP_ODATA_CLIENT_SECRET="…"  SAP_ODATA_SCOPE="…"   # scope optional
+
+./target/release/sap-automate-server
+# logs: "OData v4 backend active (sap.bp.* live) … target=tenant auth=basic"
+```
+
+`SAP_ODATA_BASE_URL` may be a bare host (the `API_BUSINESS_PARTNER` v4 path
+is appended automatically) or a full OData service-root URL (used verbatim,
+for any other service).  OAuth2 tokens are fetched on first use and cached
+until ~60 s before expiry.  Credentials are never logged — only the
+`auth` *mode* label.  The same `live_business_partner_search` test exercises
+whichever endpoint is configured:
+
+```bash
+SAP_ODATA_BASE_URL=… SAP_ODATA_AUTH=basic SAP_ODATA_USER=… SAP_ODATA_PASSWORD=… \
+  cargo test -p sap-automate-rfc --features odata live_business_partner_search -- --nocapture
+```
+
 ---
 
 ## Tier 1: in-process CI mocks
