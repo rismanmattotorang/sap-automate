@@ -418,10 +418,15 @@ impl BusinessHubClient {
 fn truncate_body(s: &str) -> String {
     let limit = 300;
     if s.len() <= limit {
-        s.to_string()
-    } else {
-        format!("{}…[+{} more chars]", &s[..limit], s.len() - limit)
+        return s.to_string();
     }
+    // Slice on a char boundary — byte-slicing panics on multibyte input,
+    // and the body here is an untrusted server response.
+    let mut end = limit;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…[+{} more chars]", &s[..end], s.len() - end)
 }
 
 #[cfg(test)]

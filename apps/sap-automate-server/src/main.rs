@@ -33,7 +33,7 @@ use sap_automate_rag::RagEngine;
 use sap_automate_rfc::{
     Credentials, CredentialProvider, CredentialSource, EnvCredentialProvider,
     LayeredCredentialProvider, MetadataCache, MockSapClient, SapClient,
-    StaticCredentialProvider,
+    SoapRfcClient, SoapRfcConfig, StaticCredentialProvider,
 };
 use std::time::Duration;
 use std::sync::Arc;
@@ -169,12 +169,35 @@ async fn main() -> anyhow::Result<()> {
     // miss-count visibility even when caching is "off".
     let cache_ttl = Duration::from_secs(cli.metadata_cache_ttl_secs);
     let metadata_cache = MetadataCache::new(inner_sap_client.clone(), cache_ttl);
-    let sap_client: Arc<dyn SapClient> = metadata_cache.clone();
-    let metadata_cache_handle = Some(metadata_cache);
     tracing::info!(
         cache_ttl_secs = cli.metadata_cache_ttl_secs,
         "RFC metadata cache active (thupalo pattern)"
     );
+
+    // RFC backend: a live SOAP transport when SAP_RFC_HTTP_URL is set
+    // (Sprint 3, reusing resolved credentials), else the offline mock.
+    // Either way the curated catalogue — reached through the metadata cache
+    // — supplies metadata and drives the read-only safety gate, so the live
+    // path keeps SAP-Automate's curated safety annotations.
+    let sap_client: Arc<dyn SapClient> = match SoapRfcConfig::from_env() {
+        Some(soap_cfg) => {
+            tracing::info!(
+                base_url = %soap_cfg.base_url,
+                client = %soap_cfg.client,
+                read_only = read_only,
+                "live SOAP RFC backend active (data ops); metadata via curated catalogue"
+            );
+            Arc::new(
+                SoapRfcClient::new(soap_cfg, metadata_cache.clone())
+                    .map_err(|e| anyhow::anyhow!("SOAP RFC client init failed: {e}"))?,
+            )
+        }
+        None => {
+            tracing::info!("SAP_RFC_HTTP_URL not set — RFC backend is the offline mock");
+            metadata_cache.clone()
+        }
+    };
+    let metadata_cache_handle = Some(metadata_cache);
 
     // ADT client — offline MockAdtClient by default; a live HttpAdtClient
     // when --destination / SAP_AUTOMATE_DESTINATION selects a real SAP

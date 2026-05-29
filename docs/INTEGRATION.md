@@ -232,8 +232,37 @@ For full RFC + ADT against a real ABAP system on your own hardware:
 
    The 17 ADT integration tests still exercise the axum mock; the
    `live_adt` test exercises the real ABAP stack.
-5. RFC integration requires the SAP NetWeaver RFC SDK (free download,
-   not redistributable — sign-in required at the SAP Software Centre).
+5. **RFC over SOAP — no NetWeaver RFC SDK needed.**  SAP-Automate's
+   `SoapRfcClient` posts to `/sap/bc/soap/rfc`, so real `RFC_READ_TABLE`,
+   `RFC_SYSTEM_INFO`, `DDIF_FIELDINFO_GET`, and generic RFC calls work over
+   plain HTTP.  Enable it with dedicated env vars (independent of the native
+   `SAP_ASHOST`/`SAP_SYSNR` credential chain):
+
+   ```bash
+   export SAP_RFC_HTTP_URL="https://s4hana.example.com:44300"
+   export SAP_RFC_CLIENT="100"
+   export SAP_RFC_USER="TECHUSER"
+   export SAP_RFC_PASSWORD="…"
+   # SAP_RFC_LANG defaults to EN
+
+   ./target/release/sap-automate-server
+   # logs: "live SOAP RFC backend active (data ops); metadata via curated catalogue"
+   ```
+
+   Data operations (`sap.table.read`, `sap.system.info`, `sap.table.structure`,
+   `sap.rfc.call`) hit the live system; metadata (`sap.rfc.metadata` /
+   `sap.rfc.search`) and the **read-only safety gate** stay served by the
+   curated RFC catalogue, so a state-modifying — or uncatalogued — function is
+   refused in read-only mode (fail-closed).  Requires the SICF node
+   `/sap/bc/soap/rfc` to be active.  Smoke-test:
+
+   ```bash
+   SAP_RFC_HTTP_URL=… SAP_RFC_USER=… SAP_RFC_PASSWORD=… \
+     cargo test -p sap-automate-rfc --features soap live_read_table_t000 -- --nocapture
+   ```
+
+   The native NetWeaver RFC SDK (FFI) remains an optional later path for
+   performance-critical native RFC; it is not required for dev-tenant testing.
 
 This tier is **not run in CI** and not exercised by the default
 `cargo test` workspace sweep.

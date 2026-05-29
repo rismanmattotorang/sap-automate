@@ -13,12 +13,16 @@ tracing = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }
 reqwest = { workspace = true, optional = true }
+quick-xml = { workspace = true, optional = true }
 
 [features]
 default = []
 # Enables the SAP S/4HANA OData v4 client (Business Accelerator Hub sandbox
 # + on-prem OData destinations).  Pulls in reqwest.
 odata = ["reqwest"]
+# Enables the SOAP RFC client (RFC_READ_TABLE / RFC_SYSTEM_INFO / generic
+# RFC over /sap/bc/soap/rfc) — the real RFC path without the NW RFC SDK.
+soap = ["reqwest", "quick-xml"]
 
 [dev-dependencies]
 tokio = { workspace = true }

@@ -179,7 +179,20 @@ run against the real tenant once Basis provides OData credentials.
 - **Gate:** `sap.bp.search` returns real BPs from the dev tenant via Basic
   and via OAuth; sandbox profile still passes the existing gated test.
 
-### Sprint 3 — Live RFC read via SOAP (`SoapRfcClient`)
+### Sprint 3 — Live RFC read via SOAP (`SoapRfcClient`) — ✅ DONE (code), pending dev-tenant run
+**Shipped:** `SoapRfcClient` (rfc crate, `soap` feature) posts SOAP envelopes
+to `/sap/bc/soap/rfc`. Live data ops — `read_table` (RFC_READ_TABLE, DELIMITER
+mode), `system_info` (RFC_SYSTEM_INFO), `table_structure` (DDIF_FIELDINFO_GET),
+generic `call_rfc`. Metadata + the read-only gate delegate to the curated
+catalogue (fail-closed: uncatalogued/state-modifying functions refused in
+read-only mode). Generic JSON⇄SOAP-XML codec (namespace-stripping, repeated
+tags→arrays, SOAP-fault surfacing, XML escaping). Wired into the server via
+`SAP_RFC_HTTP_URL` + `SAP_RFC_*` (decoupled from the native-RFC credential
+chain). 12 offline tests (envelope/codec/parsers/gate/caps) + gated live test.
+Verified: backend selection logs correctly; offline mock preserved.
+**Remaining:** run against the real tenant (needs `/sap/bc/soap/rfc` active +
+credentials); structure-aware client (MANDT) scoping deferred to hardening.
+
 **Goal:** `sap.table.read` (`RFC_READ_TABLE`) returns real rows.
 - Spike (`deep-research`): SOAP RFC envelope shape, `RFC_READ_TABLE`
   field/option/data semantics, 512-byte row cap, error/`BAPIRET2` mapping.

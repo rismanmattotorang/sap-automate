@@ -27,6 +27,8 @@ pub mod metadata_cache;
 pub mod odata;
 pub mod pool;
 pub mod retry;
+#[cfg(feature = "soap")]
+pub mod soap;
 
 pub use bapiret2::{BapiRet2Message, BapiRet2Severity, parse_bapiret2};
 pub use metadata_cache::{CacheStats, MetadataCache};
@@ -34,6 +36,8 @@ pub use metadata_cache::{CacheStats, MetadataCache};
 pub use odata::{
     BusinessHubClient, BusinessHubConfig, BusinessPartner, OdataAuth, OdataError, OdataResult,
 };
+#[cfg(feature = "soap")]
+pub use soap::{SoapRfcClient, SoapRfcConfig};
 
 pub use client::{
     BulkMetadata, MockSapClient, ReadTableRequest, RfcCallRequest, RfcFunctionMeta,
