@@ -31,7 +31,7 @@ pub struct AdtDestination {
 
 fn default_language() -> String { "EN".into() }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AdtAuth {
     /// HTTP Basic auth.  Used by both `mario-andreschak/mcp-abap-adt` and
@@ -198,6 +198,14 @@ impl AdtAuth {
     /// Secret-free label for logs / diagnostics.
     pub fn label(&self) -> &'static str {
         auth_type_label(self)
+    }
+}
+
+// Manual Debug so a stray `{:?}` (on AdtAuth or the AdtDestination that
+// contains it) can never leak a password / bearer token / key path.
+impl std::fmt::Debug for AdtAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "AdtAuth::{}", self.label())
     }
 }
 

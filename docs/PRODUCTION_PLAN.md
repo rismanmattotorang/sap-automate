@@ -204,7 +204,26 @@ credentials); structure-aware client (MANDT) scoping deferred to hardening.
 - **Gate:** `sap.table.read` on a small standard table (e.g. `T001`) returns
   real rows from the dev tenant.
 
-### Sprint 4 — Security hardening & write-path enablement (gated)
+### Sprint 4 — Security hardening & write-path enablement (gated) — ✅ DONE (code), pending dev-tenant run
+**Shipped:** ADT **ServiceKey (XSUAA)** auth — loads a BTP service key, fetches
+an OAuth2 client-credentials token, caches it (refresh 60 s early); ADT
+**Certificate (mTLS)** auth via `reqwest::Identity` from cert+key PEM (the
+"Phase 7 stub" is gone). Transactional write helper `execute_write_bapi`
+(rfc crate) — calls a BAPI then `BAPI_TRANSACTION_COMMIT`/`ROLLBACK` based on
+BAPIRET2; wired to `sap.rfc.call` via `commit=true`. Per-write `sap_audit` log
+line (function + outcome only).
+
+**Mandatory security review run** (2 agents) — fixes applied:
+- **Fail-closed commit decision**: a BAPI returning no parseable BAPIRET2 is
+  treated as *unconfirmed* and rolled back, never committed on faith.
+- **Verified rollback**: `rolled_back` reflects the real rollback result.
+- File-permission warnings on the new service-key JSON + mTLS key files.
+- Manual `Debug` on `AdtAuth` so passwords/tokens can't leak via `{:?}`.
+Review confirmed the read-only gate is fail-closed at three layers (no
+`commit=true` bypass) and credential error paths leak no secrets.
+**Remaining:** full `AuditSink` wiring (currently a tracing audit line); a real
+PO-create against the dev tenant (needs writes + credentials).
+
 **Goal:** safe to run with `--enable-writes` against a *dev* tenant.
 - Implement ServiceKey (XSUAA) + Certificate (mTLS) auth paths now stubbed.
 - Real write workflows: wire `BAPI_*` create + mandatory
@@ -216,7 +235,16 @@ credentials); structure-aware client (MANDT) scoping deferred to hardening.
 - **Gate:** a PO create in the dev tenant produces a real document number,
   fully audit-logged; security review signed off before merge.
 
-### Sprint 5 — Live observability, docs & runbook
+### Sprint 5 — Live observability, docs & runbook — ✅ DONE (docs/dashboard); live tuning pending real traffic
+**Shipped:** `docs/RUNBOOK_DEV_TENANT.md` — a single end-to-end operator guide
+(Basis hand-off checklist, ADT/OData/SOAP setup, gated writes, security
+checklist, troubleshooting table, observability). Grafana dashboard
+`deploy/grafana/sap-automate-overview.json` (tool-latency P95/P99 vs the 80 ms
+gate, error rate, call volume, RFC volume, authz denials, pool usage) over the
+existing Prometheus series. **Remaining:** tune timeout/retry/circuit-breaker
+thresholds against real dev-tenant latencies once live traffic exists (needs
+the tenant connection).
+
 **Goal:** an operator can onboard a new SAP system unaided.
 - Exercise Prometheus metrics + audit log against real-call latency; tune
   timeouts/retries/circuit-breaker thresholds with real numbers.

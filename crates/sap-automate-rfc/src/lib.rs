@@ -29,6 +29,7 @@ pub mod pool;
 pub mod retry;
 #[cfg(feature = "soap")]
 pub mod soap;
+pub mod transaction;
 
 pub use bapiret2::{BapiRet2Message, BapiRet2Severity, parse_bapiret2};
 pub use metadata_cache::{CacheStats, MetadataCache};
@@ -49,5 +50,6 @@ pub use credentials::{
     LayeredCredentialProvider, StaticCredentialProvider,
 };
 pub use error::{RfcError, RfcErrorCode, RfcResult};
+pub use transaction::{execute_write_bapi, has_failure, WriteOutcome};
 pub use pool::ConnectionPool;
 pub use retry::{retry_with_backoff, BackoffPolicy, CircuitBreaker, CircuitState};

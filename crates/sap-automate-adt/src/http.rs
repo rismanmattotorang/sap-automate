@@ -27,7 +27,8 @@ use crate::types::{
 };
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION};
-use std::time::Duration;
+use serde::Deserialize;
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
 
@@ -40,51 +41,182 @@ const CSRF_HEADER: &str = "x-csrf-token";
 const SAP_CLIENT_HEADER: &str = "X-SAP-Client";
 const SAP_LANGUAGE_HEADER: &str = "X-SAP-Language";
 
+/// Warn (non-fatally, Unix-only) when a credential-bearing file is group- or
+/// world-accessible — mirrors the destination-TOML check for the new
+/// service-key / private-key files.
+fn warn_if_world_readable(path: &str) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(path) {
+            let mode = meta.permissions().mode() & 0o777;
+            if mode & 0o077 != 0 {
+                warn!(
+                    path,
+                    mode = format!("{mode:o}"),
+                    "credential file is group/other-accessible; restrict to 0600"
+                );
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
+/// Cached XSUAA / OAuth2 bearer token for `ServiceKey` auth.
+#[derive(Clone)]
+struct CachedToken {
+    token: String,
+    expires_at: Instant,
+}
+
+/// BTP service key (XSUAA) — the fields we need for the client-credentials
+/// grant.  Real service keys carry far more; `serde` ignores the rest.
+#[derive(Debug, Deserialize)]
+struct ServiceKey {
+    clientid: String,
+    clientsecret: String,
+    /// UAA base URL.  `{url}/oauth/token` is the token endpoint.
+    url: String,
+}
+
 pub struct HttpAdtClient {
     destination: AdtDestination,
     http: reqwest::Client,
     csrf: RwLock<Option<String>>,
+    /// XSUAA token cache for `ServiceKey` auth.  Never held across `.await`.
+    token: RwLock<Option<CachedToken>>,
 }
 
 impl HttpAdtClient {
     pub fn new(destination: AdtDestination) -> AdtResult<Self> {
-        let http = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .timeout(Duration::from_secs(45))
-            .cookie_store(true)
-            .build()
-            .map_err(|e| AdtError::Internal(format!("reqwest: {e}")))?;
-        Ok(Self { destination, http, csrf: RwLock::new(None) })
+            .cookie_store(true);
+
+        // mTLS: load the client identity up front so every request presents
+        // the cert at the TLS layer.
+        if let AdtAuth::Certificate { cert_path, key_path } = &destination.auth {
+            warn_if_world_readable(key_path);
+            let cert = std::fs::read(cert_path).map_err(|e| {
+                AdtError::Internal(format!("read cert {cert_path}: {e}"))
+            })?;
+            let key = std::fs::read(key_path).map_err(|e| {
+                AdtError::Internal(format!("read key {key_path}: {e}"))
+            })?;
+            let mut pem = cert;
+            pem.push(b'\n');
+            pem.extend_from_slice(&key);
+            let identity = reqwest::Identity::from_pem(&pem).map_err(|e| {
+                AdtError::Internal(format!("invalid client certificate/key PEM: {e}"))
+            })?;
+            builder = builder.identity(identity);
+        }
+
+        let http = builder.build().map_err(|e| AdtError::Internal(format!("reqwest: {e}")))?;
+        Ok(Self {
+            destination,
+            http,
+            csrf: RwLock::new(None),
+            token: RwLock::new(None),
+        })
     }
 
     fn url(&self, path: &str) -> String {
         format!("{}{}", self.destination.base_url.trim_end_matches('/'), path)
     }
 
-    fn auth_header(&self) -> AdtResult<Option<HeaderValue>> {
+    /// Resolve the `Authorization` header, fetching/refreshing an XSUAA
+    /// token for `ServiceKey` auth.  `None` means no header (Mock / mTLS,
+    /// where the cert authenticates at the TLS layer).
+    async fn resolve_auth_header(&self) -> AdtResult<Option<HeaderValue>> {
         match &self.destination.auth {
             AdtAuth::Basic { user, password } => {
                 use base64_compat::encode as b64;
                 let encoded = b64(&format!("{user}:{password}"));
-                Ok(Some(HeaderValue::from_str(&format!("Basic {encoded}"))
-                    .map_err(|e| AdtError::Internal(e.to_string()))?))
+                Ok(Some(
+                    HeaderValue::from_str(&format!("Basic {encoded}"))
+                        .map_err(|e| AdtError::Internal(e.to_string()))?,
+                ))
             }
-            AdtAuth::Bearer { token } => Ok(Some(HeaderValue::from_str(&format!("Bearer {token}"))
-                .map_err(|e| AdtError::Internal(e.to_string()))?)),
-            AdtAuth::ServiceKey { .. } | AdtAuth::Certificate { .. } => Err(AdtError::Internal(
-                "ServiceKey / Certificate auth not yet wired (Phase 7)".into(),
+            AdtAuth::Bearer { token } => Ok(Some(
+                HeaderValue::from_str(&format!("Bearer {token}"))
+                    .map_err(|e| AdtError::Internal(e.to_string()))?,
             )),
-            AdtAuth::Mock => Ok(None),
+            AdtAuth::ServiceKey { path } => {
+                let token = self.service_key_token(path).await?;
+                Ok(Some(
+                    HeaderValue::from_str(&format!("Bearer {token}"))
+                        .map_err(|e| AdtError::Internal(e.to_string()))?,
+                ))
+            }
+            // mTLS authenticates at the TLS layer; no Authorization header.
+            AdtAuth::Certificate { .. } | AdtAuth::Mock => Ok(None),
         }
     }
 
-    fn base_headers(&self) -> AdtResult<HeaderMap> {
+    /// Fetch (and cache) an XSUAA access token via the client-credentials
+    /// grant described by the BTP service key at `path`.
+    async fn service_key_token(&self, path: &str) -> AdtResult<String> {
+        // Fast path: a cached, still-valid token.  Guard dropped before await.
+        if let Some(t) = self.token.read().await.as_ref() {
+            if t.expires_at > Instant::now() {
+                return Ok(t.token.clone());
+            }
+        }
+
+        warn_if_world_readable(path);
+        let raw = std::fs::read_to_string(path)
+            .map_err(|e| AdtError::Internal(format!("read service key {path}: {e}")))?;
+        // SECURITY: don't echo the toml/json error (it can quote the secret).
+        let key: ServiceKey = serde_json::from_str(&raw)
+            .map_err(|_| AdtError::Internal(format!("service key {path} is not valid JSON")))?;
+
+        let token_url = format!("{}/oauth/token", key.url.trim_end_matches('/'));
+        let resp = self
+            .http
+            .post(&token_url)
+            .basic_auth(&key.clientid, Some(&key.clientsecret))
+            .form(&[("grant_type", "client_credentials")])
+            .send()
+            .await
+            .map_err(|e| AdtError::DestinationDown {
+                destination: self.destination.name.clone(),
+                reason: format!("XSUAA token request: {e}"),
+            })?;
+        let status = resp.status();
+        let body = resp.text().await.map_err(|e| AdtError::Internal(e.to_string()))?;
+        if status == 401 || status == 403 {
+            return Err(AdtError::Forbidden(format!("XSUAA rejected the service key (HTTP {status})")));
+        }
+        if !status.is_success() {
+            return Err(AdtError::Internal(format!("XSUAA token endpoint -> HTTP {status}")));
+        }
+
+        #[derive(Deserialize)]
+        struct TokenResp {
+            access_token: String,
+            #[serde(default)]
+            expires_in: Option<u64>,
+        }
+        let tok: TokenResp = serde_json::from_str(&body)
+            .map_err(|_| AdtError::Internal("malformed XSUAA token response".into()))?;
+        let ttl = tok.expires_in.unwrap_or(3600).saturating_sub(60).max(1);
+        *self.token.write().await = Some(CachedToken {
+            token: tok.access_token.clone(),
+            expires_at: Instant::now() + Duration::from_secs(ttl),
+        });
+        Ok(tok.access_token)
+    }
+
+    async fn base_headers(&self) -> AdtResult<HeaderMap> {
         let mut h = HeaderMap::new();
         h.insert(ACCEPT, HeaderValue::from_static("*/*"));
         h.insert(SAP_CLIENT_HEADER, HeaderValue::from_str(&self.destination.client)
             .map_err(|e| AdtError::Internal(e.to_string()))?);
         h.insert(SAP_LANGUAGE_HEADER, HeaderValue::from_str(&self.destination.language)
             .map_err(|e| AdtError::Internal(e.to_string()))?);
-        if let Some(auth) = self.auth_header()? {
+        if let Some(auth) = self.resolve_auth_header().await? {
             h.insert(AUTHORIZATION, auth);
         }
         Ok(h)
@@ -92,7 +224,7 @@ impl HttpAdtClient {
 
     async fn fetch_text(&self, path: &str) -> AdtResult<String> {
         let url = self.url(path);
-        let headers = self.base_headers()?;
+        let headers = self.base_headers().await?;
         let resp = self.http.get(&url).headers(headers).send().await
             .map_err(|e| AdtError::DestinationDown {
                 destination: self.destination.name.clone(),
@@ -121,7 +253,7 @@ impl HttpAdtClient {
     /// Hint the server we want a CSRF token before a mutating call.
     async fn refresh_csrf(&self) -> AdtResult<()> {
         let url = self.url("/sap/bc/adt/discovery");
-        let mut headers = self.base_headers()?;
+        let mut headers = self.base_headers().await?;
         headers.insert(CSRF_HEADER, HeaderValue::from_static("Fetch"));
         let resp = self.http.get(&url).headers(headers).send().await
             .map_err(|e| AdtError::DestinationDown {
@@ -177,7 +309,7 @@ impl AdtClient for HttpAdtClient {
         //   POST /sap/bc/adt/repository/nodestructure
         //   parent_type=DEVC%2FK&parent_name=<package>&withShortDescriptions=true
         let url = self.url("/sap/bc/adt/repository/nodestructure");
-        let mut headers = self.base_headers()?;
+        let mut headers = self.base_headers().await?;
         headers.insert(
             reqwest::header::CONTENT_TYPE,
             HeaderValue::from_static("application/x-www-form-urlencoded"),
@@ -242,7 +374,7 @@ impl AdtClient for HttpAdtClient {
             self.destination.base_url.trim_end_matches('/'),
             urlencoding::encode(&obj_uri),
         );
-        let mut headers = self.base_headers()?;
+        let mut headers = self.base_headers().await?;
         headers.insert(
             reqwest::header::CONTENT_TYPE,
             HeaderValue::from_static("application/vnd.sap.adt.repository.usagereferences.request+xml"),
@@ -280,7 +412,7 @@ impl AdtClient for HttpAdtClient {
             "/sap/bc/adt/datapreview/freestyle?rowNumber={max_rows}&dataAging=true",
         );
         let url = self.url(&path);
-        let mut headers = self.base_headers()?;
+        let mut headers = self.base_headers().await?;
         headers.insert(reqwest::header::CONTENT_TYPE, HeaderValue::from_static("text/plain; charset=utf-8"));
         let body = format!("SELECT * FROM {} ", table);
         let resp = self.http.post(&url).headers(headers).body(body).send().await
@@ -312,7 +444,7 @@ impl AdtClient for HttpAdtClient {
         let token = self.csrf.read().await.clone()
             .ok_or(AdtError::CsrfRefresh)?;
         let url = self.url("/sap/bc/adt/activation");
-        let mut headers = self.base_headers()?;
+        let mut headers = self.base_headers().await?;
         headers.insert(CSRF_HEADER, HeaderValue::from_str(&token)
             .map_err(|e| AdtError::Internal(e.to_string()))?);
         headers.insert(reqwest::header::CONTENT_TYPE, HeaderValue::from_static("application/xml"));
@@ -752,5 +884,47 @@ mod urlencoding {
             }
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod auth_tests {
+    use super::*;
+
+    #[test]
+    fn service_key_parses_minimal_xsuaa_shape() {
+        // Real BTP service keys carry many more fields; we only need three.
+        let raw = r#"{
+            "clientid": "sb-app!t123",
+            "clientsecret": "shhh",
+            "url": "https://acme.authentication.eu10.hana.ondemand.com/",
+            "xsappname": "app",
+            "identityzone": "acme"
+        }"#;
+        let key: ServiceKey = serde_json::from_str(raw).unwrap();
+        assert_eq!(key.clientid, "sb-app!t123");
+        assert_eq!(key.clientsecret, "shhh");
+        let token_url = format!("{}/oauth/token", key.url.trim_end_matches('/'));
+        assert_eq!(token_url, "https://acme.authentication.eu10.hana.ondemand.com/oauth/token");
+    }
+
+    #[test]
+    fn mtls_destination_builds_client_or_reports_bad_pem() {
+        // A bogus PEM must surface a clean error, not panic.
+        let dest = AdtDestination {
+            name: "mtls".into(),
+            base_url: "https://s4.example.com:44300".into(),
+            client: "100".into(),
+            language: "EN".into(),
+            auth: AdtAuth::Certificate {
+                cert_path: "/nonexistent/cert.pem".into(),
+                key_path: "/nonexistent/key.pem".into(),
+            },
+        };
+        match HttpAdtClient::new(dest) {
+            Err(AdtError::Internal(_)) => {}
+            Err(other) => panic!("expected Internal error, got {other:?}"),
+            Ok(_) => panic!("expected an error for a nonexistent cert path"),
+        }
     }
 }

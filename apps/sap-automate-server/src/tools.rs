@@ -18,7 +18,7 @@ use sap_automate_adt::{
 use sap_automate_kb::Domain;
 use sap_automate_rag::Query;
 use sap_automate_rfc::{
-    ReadTableRequest, RfcCallRequest, MAX_ROWS_HARD_CAP,
+    execute_write_bapi, ReadTableRequest, RfcCallRequest, MAX_ROWS_HARD_CAP,
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -608,10 +608,38 @@ fn tool_rfc_call(ctx: &Arc<ServerContext>) -> ToolDescriptor {
     let handler = ToolFn(move |arguments: serde_json::Value| {
         let ctx = Arc::clone(&ctx);
         async move {
+            // `commit` is read off the raw args (RfcCallRequest ignores it).
+            let commit = arguments.get("commit").and_then(|v| v.as_bool()).unwrap_or(false);
             let request: RfcCallRequest = match serde_json::from_value(arguments) {
                 Ok(a) => a,
                 Err(e) => return Ok(CallToolResult::error(format!("sap.rfc.call: invalid arguments: {e}"))),
             };
+            if commit {
+                // Transactional write: call the BAPI, then auto
+                // commit-or-rollback based on its BAPIRET2 (gated by
+                // --enable-writes).
+                return match execute_write_bapi(ctx.sap_client.as_ref(), request, ctx.read_only).await {
+                    Ok(outcome) => {
+                        // Audit trail — function + outcome only, never params.
+                        tracing::info!(
+                            target: "sap_audit",
+                            function = %outcome.function,
+                            committed = outcome.committed,
+                            rolled_back = outcome.rolled_back,
+                            messages = outcome.messages.len(),
+                            "transactional write executed"
+                        );
+                        render_json("sap.rfc.call", &serde_json::json!({
+                            "function": outcome.function,
+                            "committed": outcome.committed,
+                            "rolled_back": outcome.rolled_back,
+                            "messages": outcome.messages,
+                            "result": outcome.result,
+                        }))
+                    }
+                    Err(e) => Ok(CallToolResult::error(format!("sap.rfc.call [{:?}]: {e}", e.code()))),
+                };
+            }
             match ctx.sap_client.call_rfc(request, ctx.read_only).await {
                 Ok(result) => render_json("sap.rfc.call", &result),
                 Err(e) => Ok(CallToolResult::error(format!("sap.rfc.call [{:?}]: {e}", e.code()))),
@@ -620,14 +648,15 @@ fn tool_rfc_call(ctx: &Arc<ServerContext>) -> ToolDescriptor {
     });
     ToolDescriptor::new(
         "sap.rfc.call",
-        Some("Execute an RFC function by name with a parameters object. Read-only mode (default) blocks any RFC not declared safe. Errors carry structured codes (RFC_TIMEOUT, RFC_AUTH_FAILED, etc.).".into()),
+        Some("Execute an RFC function by name with a parameters object. Read-only mode (default) blocks any RFC not declared safe. Set commit=true to run it as a transactional write: the BAPI is followed by BAPI_TRANSACTION_COMMIT on success or BAPI_TRANSACTION_ROLLBACK on a BAPIRET2 error (requires --enable-writes). Errors carry structured codes (RFC_TIMEOUT, RFC_AUTH_FAILED, etc.).".into()),
         ToolInputSchema::from_value(serde_json::json!({
             "type": "object",
             "properties": {
                 "function": {"type": "string", "description": "RFC function name"},
                 "parameters": {"type": "object", "description": "Function parameter object"},
                 "timeout_ms": {"type": "integer", "minimum": 100, "maximum": 600000, "default": 30000},
-                "require_read_only_safe": {"type": "boolean", "default": true}
+                "require_read_only_safe": {"type": "boolean", "default": true},
+                "commit": {"type": "boolean", "default": false, "description": "Run as a transactional write with automatic commit/rollback (requires --enable-writes)."}
             },
             "required": ["function"],
             "additionalProperties": false
