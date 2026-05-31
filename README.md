@@ -2,10 +2,12 @@
 
 # SAP-Automate
 
-### The agentic OS for SAP — built in Rust, on-premise by default.
+### The agentic operating system for the enterprise core.
 
-**Sub-millisecond retrieval. 172 SAP-correctness tests. Apache-2.0.**
-**Made by [Gaussian Technologies](#about-gaussian-technologies).**
+#### Rust-native · sub-millisecond · on-premise by default.
+
+**The world's largest companies run on SAP. The next decade of enterprise AI will too.**
+**SAP-Automate is the open infrastructure that closes the gap — built by [Gaussian Technologies](#about-gaussian-technologies).**
 
 [![CI](https://img.shields.io/badge/CI-passing-22c55e?style=flat-square&logo=githubactions)](.github/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/tests-172%20passing-22d3ee?style=flat-square)](#tests)
@@ -13,9 +15,16 @@
 [![MCP](https://img.shields.io/badge/MCP-2025--06--18-8b5cf6?style=flat-square)](https://modelcontextprotocol.io)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
 
-[**Quick start →**](#quick-start) · [Why it exists](#why-gaussian-technologies-built-this) · [What you can do](#what-you-can-do-with-it) · [Architecture](#architecture) · [Roadmap](docs/ROADMAP.md) · [Whitepaper](docs/SAPAutomate.pdf)
+[**Quick start →**](#quick-start) · [The thesis](#the-thesis) · [What you can do](#what-you-can-do-with-it) · [Architecture](#architecture) · [Roadmap](docs/ROADMAP.md) · [Whitepaper](docs/SAPAutomate.pdf)
 
 </div>
+
+---
+
+> AI agents can already reason about almost anything — except the systems where the world's
+> money actually moves. SAP-Automate is the missing substrate: a single Rust binary that gives any
+> agent fast, correct, governed access to SAP S/4HANA, with the correctness story written down in
+> tests and the whole thing running inside your own perimeter.
 
 ---
 
@@ -64,19 +73,19 @@ Production-grade manifests live in [`deploy/k8s/`](deploy/k8s/README.md): 3-repl
 
 ---
 
-## Why Gaussian Technologies built this
+## The thesis
 
-SAP S/4HANA runs the financials, supply chains, and HR of a substantial slice of the Fortune 500. But the gap between *what AI agents can do generally* and *what they can do against SAP* is enormous:
+SAP S/4HANA runs the financials, supply chains, and HR of a substantial slice of the Fortune 500. It is the most valuable — and most under-served — surface in enterprise AI. The gap between *what agents can do generally* and *what they can do against SAP* is enormous:
 
-- **3% of SAP customers run SAP Business AI in production.**
-- **77% of AI-active enterprises rely on non-SAP alternatives.**
-- (DSAG Investment Survey 2026.)
+- **3%** of SAP customers run SAP Business AI in production.
+- **77%** of AI-active enterprises rely on non-SAP alternatives.
+- *(DSAG Investment Survey 2026.)*
 
-The open-source SAP MCP servers that exist today are fragmented across vendors, drift from SAP API Hub canon, ship in Python / Node with 10–100 ms latency tails, and quietly require cloud-only deployment.
+That gap isn't a model problem — it's an **infrastructure** problem. The open-source SAP connectors that exist today are fragmented across vendors, drift from SAP API Hub canon, ship in Python / Node with 10–100 ms latency tails, and quietly require cloud-only deployment. None of them are something you'd put in front of a production agent touching a general ledger.
 
-**That's the gap. SAP-Automate closes it — on-prem, in Rust, with the correctness story written down in tests.**
+**Our bet:** the enterprise core deserves the same caliber of infrastructure that the rest of the AI stack now takes for granted — fast, correct, governed, and open. So we built it.
 
-Gaussian Technologies is the customer that needed this. We built it for our own SAP estate first, then open-sourced it because the cost of fragmentation is too high to bear alone.
+SAP-Automate is that infrastructure. One Rust binary. Sub-millisecond retrieval. Correctness pinned by tests that fail the moment they drift from SAP canon. On-prem by default, because the systems that move money don't belong on someone else's cloud. **MIT-grade systems engineering, pointed at the least glamorous and most important part of the enterprise.**
 
 ---
 
@@ -93,9 +102,9 @@ Gaussian Technologies is the customer that needed this. We built it for our own 
 
 ---
 
-## Where it leads on speed, correctness, and openness
+## The moat: speed, correctness, openness
 
-> **Three claims. One repo to verify them.**
+> **Three claims. One repo to verify every one of them — no demo, no waitlist, no sales call.**
 
 ### 1. Sub-millisecond retrieval — 500–5000× under the published gates
 
@@ -322,15 +331,15 @@ Coverage spans:
 
 ## About Gaussian Technologies
 
-**Gaussian Technologies** is an Indonesia-based enterprise that runs a large SAP S/4HANA estate across consumer goods, retail, and manufacturing operations. The TPO (Technology Product Owner) R&D team builds and operates the AI tooling that Gaussian Technologies' own SAP organisation depends on every day.
+**Gaussian Technologies** is a deep tech company building the agentic infrastructure layer for the enterprise core. We started where the problem is hardest and the stakes are highest — SAP S/4HANA, across consumer goods, retail, and manufacturing — and we build for the operators who run those systems every day, with real sovereignty and correctness obligations.
 
-We built SAP-Automate because the existing options didn't fit:
+We exist because the alternatives don't fit the bar:
 
-- **Joule / SAP Business AI** assumes RISE / GROW — we run on-prem with sovereignty obligations.
-- **Commercial MCP servers** are per-seat and closed.
-- **Open-source MCP servers** are fragmented across vendors and ship in stacks that don't meet our latency budgets.
+- **Joule / SAP Business AI** assumes RISE / GROW — the enterprises we serve run on-prem, with data-residency and sovereignty constraints.
+- **Commercial MCP servers** are per-seat, closed, and unverifiable.
+- **Open-source connectors** are fragmented across vendors and ship in stacks that miss the latency and correctness budgets the core demands.
 
-So we built our own, then released it under Apache-2.0 — because the cost of being the only customer of a tool this complex is too high. The architecture is documented in *SAP-Automate: An MCP-Native RAG Architecture for SAP S/4HANA* ([whitepaper](docs/SAPAutomate.pdf)), Gaussian Technologies Technical Review Vol. 1 No. 1 (2026).
+So we built our own from first principles, in Rust, and released it under Apache-2.0 — because foundational infrastructure earns trust by being inspectable, not by being a black box. The architecture is published in full: *SAP-Automate: An MCP-Native RAG Architecture for SAP S/4HANA* ([whitepaper](docs/SAPAutomate.pdf)), Gaussian Technologies Technical Review Vol. 1 No. 1 (2026).
 
 **We're hiring.** If you want to work on Rust + SAP + agentic systems at production scale, reach out at `tpo-research@gaussiantech.com`.
 
@@ -353,13 +362,14 @@ So we built our own, then released it under Apache-2.0 — because the cost of b
 
 ## License
 
-[Apache-2.0](LICENSE). Use it, fork it, build a business on top of it.
+[Apache-2.0](LICENSE). Use it, fork it, build a business on top of it. Foundational infrastructure should be owned by the people who depend on it.
 
 ---
 
 <div align="center">
 
-**Gaussian Technologies** · TPO R&D · 2026
-*Reference design: GT-TR-2026-SAP-AUTOMATE-01*
+**Gaussian Technologies** — agentic infrastructure for the enterprise core.
+
+TPO R&D · 2026 · *Reference design GT-TR-2026-SAP-AUTOMATE-01*
 
 </div>
