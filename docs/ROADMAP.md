@@ -2,7 +2,7 @@
 
 > **Status: v1.3.0 released — 2026-05-25.**  v1.0 paper phases ✅ complete; v1.1 shipped three convergence passes (skills + apps + KB/RAG/crawler); v1.2 filled in optional MCP 2025-06-18 spec utilities; v1.3 ships the Live SAP backend tier — `BusinessHubClient` against the SAP Business Accelerator Hub sandbox (OData v4, `API_BUSINESS_PARTNER`), with `sap.bp.search` / `sap.bp.get` MCP tools.  See [`CHANGELOG.md`](../CHANGELOG.md) for release notes and [`docs/INTEGRATION.md`](INTEGRATION.md) for the 3-tier integration strategy.
 
-This document translates the SAP-Automate paper (ParagonCorp TPO R&D, 2026)
+This document translates the SAP-Automate paper (Gaussian Technologies TPO R&D, 2026)
 into an executable Rust roadmap.
 
 ## Strategic goals
@@ -233,7 +233,7 @@ The four product themes for v1.1 through v2.0:
 1. **Real-world wiring** — replace every mock backend with a live integration test against a real SAP / Qdrant / ArangoDB / Postgres.
 2. **Enterprise security** — OAuth 2.1, XSUAA service-key, mTLS, SBOM, cosigned containers, third-party pen-test.
 3. **Agent intelligence** — LLM router, reflection loop, sub-agent runtime, real ONNX cross-encoder, contextual enrichment via prompt-cached LLM call.
-4. **Ecosystem reach** — Microsoft Teams / Slack / Telegram / WhatsApp real adapters, public docs site, sample agent libraries, ParagonCorp Skill Commons.
+4. **Ecosystem reach** — Microsoft Teams / Slack / Telegram / WhatsApp real adapters, public docs site, sample agent libraries, Gaussian Technologies Skill Commons.
 
 ## Versioned milestones
 
@@ -292,7 +292,7 @@ Replace the current keyword-based intent router with LLM-driven reasoning.
 - **`LlmRouter` trait** + reference implementations against Claude, GPT, Gemini, local Llama via `llama.cpp`.
 - **Reflection loop** (paper §IX-B P3-self-improvement): trajectory capture → LLM critique → memory consolidation into episodic store.
 - **Sub-agent runtime** (paper §IX-B): contained child agents share the parent's MCP surface but with restricted exposure policies.
-- **Skill Commons** (paper §X-L): private registry at `commons.paragoncorp.example` for signed, code-reviewed skills.  Skills carry an Ed25519 signature; unsigned skills refuse to load in production deployments.
+- **Skill Commons** (paper §X-L): private registry at `commons.gaussiantech.example` for signed, code-reviewed skills.  Skills carry an Ed25519 signature; unsigned skills refuse to load in production deployments.
 - **Streaming responses** through the HTTP/SSE transport (`notifications/progress` per MCP 2025-06-18) so the web UI renders tokens as they arrive.
 
 ### v1.6 — Multi-tenancy + multi-system  (Q2 2027, ~6 weeks)
@@ -345,7 +345,7 @@ Three tracks run continuously alongside the versioned milestones:
   - Benchmark against named market alternatives (Joule, CData, the 6 reference projects) using paper §XII methodology — publish results quarterly.
   - Track which retrieval layer (L2/L3/L4/L5) the agent actually picks in production — feeds the next iteration of the router.
   - Episodic-memory hit-rate measurement (paper §X-L gate of 8%) — informs skill-commons promotion.
-  - Continued whitepaper updates as the system evolves; ParagonCorp Technical Review Vol. 1 No. 2 planned for end of 2026.
+  - Continued whitepaper updates as the system evolves; Gaussian Technologies Technical Review Vol. 1 No. 2 planned for end of 2026.
 
 ## What's explicitly NOT on the roadmap
 
@@ -360,8 +360,8 @@ To keep the project focused:
 
 - Open a GitHub issue tagged `roadmap` with a use case.
 - Vote on existing `roadmap` issues.
-- For enterprise customers: ParagonCorp accepts paid prioritisation under standard commercial terms — contact `tpo-research@paracorpgroup.com`.
+- For enterprise customers: Gaussian Technologies accepts paid prioritisation under standard commercial terms — contact `tpo-research@gaussiantech.com`.
 
 ---
 
-*Reference design: PC-TR-2026-SAP-AUTOMATE-01.  Whitepaper: [`docs/SAPAutomate.pdf`](SAPAutomate.pdf).*
+*Reference design: GT-TR-2026-SAP-AUTOMATE-01.  Whitepaper: [`docs/SAPAutomate.pdf`](SAPAutomate.pdf).*

@@ -419,7 +419,7 @@ tests, and exposing it to operators (TUI + web).
 
 The first general-availability release of **SAP-Automate** — a
 Rust-native, MCP-native agentic interface for SAP S/4HANA built by
-the **ParagonCorp TPO R&D team**.
+the **Gaussian Technologies TPO R&D team**.
 
 ### Highlights
 
@@ -570,5 +570,5 @@ the **ParagonCorp TPO R&D team**.
 
 ## Reference
 
-- Architecture whitepaper: *SAP-Automate: An MCP-Native RAG Architecture for SAP S/4HANA*, ParagonCorp Technical Review Vol. 1 No. 1 (2026).  Reference design code `PC-TR-2026-SAP-AUTOMATE-01`.
+- Architecture whitepaper: *SAP-Automate: An MCP-Native RAG Architecture for SAP S/4HANA*, Gaussian Technologies Technical Review Vol. 1 No. 1 (2026).  Reference design code `GT-TR-2026-SAP-AUTOMATE-01`.
 - MCP specification: <https://modelcontextprotocol.io/specification/2025-06-18>.

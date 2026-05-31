@@ -5,7 +5,7 @@
 ### The agentic OS for SAP — built in Rust, on-premise by default.
 
 **Sub-millisecond retrieval. 172 SAP-correctness tests. Apache-2.0.**
-**Made by [ParagonCorp](#about-paragoncorp).**
+**Made by [Gaussian Technologies](#about-gaussian-technologies).**
 
 [![CI](https://img.shields.io/badge/CI-passing-22c55e?style=flat-square&logo=githubactions)](.github/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/tests-172%20passing-22d3ee?style=flat-square)](#tests)
@@ -13,7 +13,7 @@
 [![MCP](https://img.shields.io/badge/MCP-2025--06--18-8b5cf6?style=flat-square)](https://modelcontextprotocol.io)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
 
-[**Quick start →**](#quick-start) · [Why it exists](#why-paragoncorp-built-this) · [What you can do](#what-you-can-do-with-it) · [Architecture](#architecture) · [Roadmap](docs/ROADMAP.md) · [Whitepaper](docs/SAPAutomate.pdf)
+[**Quick start →**](#quick-start) · [Why it exists](#why-gaussian-technologies-built-this) · [What you can do](#what-you-can-do-with-it) · [Architecture](#architecture) · [Roadmap](docs/ROADMAP.md) · [Whitepaper](docs/SAPAutomate.pdf)
 
 </div>
 
@@ -64,7 +64,7 @@ Production-grade manifests live in [`deploy/k8s/`](deploy/k8s/README.md): 3-repl
 
 ---
 
-## Why ParagonCorp built this
+## Why Gaussian Technologies built this
 
 SAP S/4HANA runs the financials, supply chains, and HR of a substantial slice of the Fortune 500. But the gap between *what AI agents can do generally* and *what they can do against SAP* is enormous:
 
@@ -76,7 +76,7 @@ The open-source SAP MCP servers that exist today are fragmented across vendors, 
 
 **That's the gap. SAP-Automate closes it — on-prem, in Rust, with the correctness story written down in tests.**
 
-ParagonCorp is the customer that needed this. We built it for our own SAP estate first, then open-sourced it because the cost of fragmentation is too high to bear alone.
+Gaussian Technologies is the customer that needed this. We built it for our own SAP estate first, then open-sourced it because the cost of fragmentation is too high to bear alone.
 
 ---
 
@@ -285,7 +285,7 @@ sap-automate/
 
 | Document | What |
 |---|---|
-| [`docs/SAPAutomate.pdf`](docs/SAPAutomate.pdf) | The ParagonCorp whitepaper — full architectural specification |
+| [`docs/SAPAutomate.pdf`](docs/SAPAutomate.pdf) | The Gaussian Technologies whitepaper — full architectural specification |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Phased delivery plan with current status per release |
 | [`docs/SAP_CORRECTNESS.md`](docs/SAP_CORRECTNESS.md) | Every fixture mapped to its SAP source-of-truth |
 | [`docs/COMPARISON.md`](docs/COMPARISON.md) | Side-by-side analysis vs reference SAP MCP servers |
@@ -320,9 +320,9 @@ Coverage spans:
 
 ---
 
-## About ParagonCorp
+## About Gaussian Technologies
 
-**ParagonCorp** is an Indonesia-based enterprise that runs a large SAP S/4HANA estate across consumer goods, retail, and manufacturing operations. The TPO (Technology Product Owner) R&D team builds and operates the AI tooling that ParagonCorp's own SAP organisation depends on every day.
+**Gaussian Technologies** is an Indonesia-based enterprise that runs a large SAP S/4HANA estate across consumer goods, retail, and manufacturing operations. The TPO (Technology Product Owner) R&D team builds and operates the AI tooling that Gaussian Technologies' own SAP organisation depends on every day.
 
 We built SAP-Automate because the existing options didn't fit:
 
@@ -330,9 +330,9 @@ We built SAP-Automate because the existing options didn't fit:
 - **Commercial MCP servers** are per-seat and closed.
 - **Open-source MCP servers** are fragmented across vendors and ship in stacks that don't meet our latency budgets.
 
-So we built our own, then released it under Apache-2.0 — because the cost of being the only customer of a tool this complex is too high. The architecture is documented in *SAP-Automate: An MCP-Native RAG Architecture for SAP S/4HANA* ([whitepaper](docs/SAPAutomate.pdf)), ParagonCorp Technical Review Vol. 1 No. 1 (2026).
+So we built our own, then released it under Apache-2.0 — because the cost of being the only customer of a tool this complex is too high. The architecture is documented in *SAP-Automate: An MCP-Native RAG Architecture for SAP S/4HANA* ([whitepaper](docs/SAPAutomate.pdf)), Gaussian Technologies Technical Review Vol. 1 No. 1 (2026).
 
-**We're hiring.** If you want to work on Rust + SAP + agentic systems at production scale, reach out at `tpo-research@paracorpgroup.com`.
+**We're hiring.** If you want to work on Rust + SAP + agentic systems at production scale, reach out at `tpo-research@gaussiantech.com`.
 
 ---
 
@@ -359,7 +359,7 @@ So we built our own, then released it under Apache-2.0 — because the cost of b
 
 <div align="center">
 
-**ParagonCorp** · TPO R&D · 2026
-*Reference design: PC-TR-2026-SAP-AUTOMATE-01*
+**Gaussian Technologies** · TPO R&D · 2026
+*Reference design: GT-TR-2026-SAP-AUTOMATE-01*
 
 </div>

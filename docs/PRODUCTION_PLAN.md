@@ -1,7 +1,7 @@
 # SAP-Automate — Production Readiness Assessment & Sprint Plan
 
 > **Goal of this document:** get the codebase to a state where it can be
-> *tested against a real ParagonCorp development S/4HANA system* — not the
+> *tested against a real Gaussian Technologies development S/4HANA system* — not the
 > public Business Hub sandbox, not in-memory fixtures, but a live dev tenant.
 >
 > **Status as assessed:** 2026-05-29. Build healthy (16 crates + 8 apps
@@ -30,7 +30,7 @@ genuinely strong and well-tested. The gap is concentrated entirely in the
 | Signavio / LeanIX connectors | "ABAP + BPMN + LeanIX" | `sap-automate-connectors` is a 40-line stub | ❌ No |
 
 **Bottom line:** the only two pieces of real network code (`HttpAdtClient`,
-`BusinessHubClient`) cannot today reach a ParagonCorp dev tenant — one is
+`BusinessHubClient`) cannot today reach a Gaussian Technologies dev tenant — one is
 unwired, the other points at SAP's public sandbox. Closing those two gaps,
 plus choosing an RFC transport, is the whole job.
 
@@ -266,7 +266,7 @@ the tenant connection).
 
 ## 6. Definition of done — "testable on dev S/4HANA"
 
-The goal is met when, against the ParagonCorp dev tenant:
+The goal is met when, against the Gaussian Technologies dev tenant:
 
 1. A configured destination drives a **real** ADT read, OData read, and SOAP
    RFC `RFC_READ_TABLE` — all returning live data.
